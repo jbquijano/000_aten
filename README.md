@@ -8,7 +8,6 @@ High-throughput sequencing, targeting the ITS2 region of the nuclear ribosomal D
 
 - `scripts/` – Quarto documents (R scripts) for downstream statistical analysis.
 - `data/` – Metadata, representative sequences, and intermediate data files.
-- `results/` – Output figures and summary tables for interpretation and reporting.
 - `README.md` – Overview of project goals, methods, and usage instructions.
 
 ---
