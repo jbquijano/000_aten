@@ -1,0 +1,188 @@
+---
+title: "Figure 1C"
+format: html
+theme: 
+  light: zephyr
+  dark: cyborg
+toc: true
+page-layout: full
+number-sections: true
+number-depth: 3
+editor: visual
+self-contained: true
+---
+
+# Figure 1C - Minmax normalized values
+
+This Quarto document contains the data manipulation and plot generation for Figure 1C of Quijano, et al., 2024.
+
+## Import libraries
+
+```{r}
+pacman::p_load(tidyverse,
+               broom,
+               ggbeeswarm,
+               cowplot,
+               tidytext,
+               ggtext)
+```
+
+## Import metadata
+
+```{r}
+#| warning: false
+A_metadata <- 
+  read_csv('../data/Fig01_metadata.csv')
+```
+
+## Make a colors list
+
+```{r}
+Z_color_htol_int <-
+  c("Thermotolerant"="#B2182B",
+    "Intermediate"="gray",
+    "Thermosensitive"="#2166AC")
+```
+
+## Import mortality data
+
+```{r}
+B_mor_df <- 
+  read_csv('../data/Figure01C_Merged_Mortality.csv')
+
+B_mor_df <- 
+  B_mor_df |> 
+  select(Species, Colony, `Proportion of fragments bleached, %`)
+```
+
+## Import MIG data
+
+```{r}
+B_mig_df <- 
+  read_csv('../data/Figure01C_Merged_MIG.csv')
+
+B_mig_df <- 
+  B_mig_df |> 
+  select(`Colony ID`, Mean) |> 
+  rename(Colony = `Colony ID`)
+```
+
+## Normalize data
+
+Merge.
+
+```{r}
+C_mor.mig_df <- 
+  B_mor_df |> 
+  left_join(B_mig_df,
+            by = 'Colony')
+```
+
+Make a function for rescaling (min-max normalizaiton).
+
+```{r}
+Z_mor.mig_minmax_f <- 
+  function(x){
+    (x - min(x)) /(max(x) - min(x))
+  }
+```
+
+Invert, normalize and combine data.
+
+```{r}
+C_mor.mig_df <- 
+  C_mor.mig_df |> 
+  group_by(Species) |> 
+  
+  # Invert values
+  mutate(mor_norm = Z_mor.mig_minmax_f(`Proportion of fragments bleached, %`),
+         mig_norm = Z_mor.mig_minmax_f(Mean)) |> 
+  mutate(combined = (mor_norm + mig_norm))
+```
+
+Rank.
+
+```{r}
+C_mor.mig_rank <- 
+  C_mor.mig_df |> 
+  group_by(Species) |> 
+  arrange(combined, .by_group = TRUE) |> 
+  mutate(Ranking  = seq_along(Species)) |> 
+  mutate('Heat tolerance' = case_when(Species == 'A. digitifera' & Ranking <= 8 ~ 'High',
+                                      Species == 'A. digitifera' & Ranking >= 33 ~ 'Low',
+                                      Species == 'A. millepora' & Ranking <= 6 ~ 'High',
+                                      Species == 'A. millepora' & Ranking >= 25 ~ 'Low',
+                                      Species == 'A. tenuis' & Ranking <= 5 ~ 'High',
+                                      Species == 'A. tenuis' & Ranking >= 21 ~ 'Low',
+                                      .default = 'Intermediate'))
+```
+
+Export.
+
+```{r}
+write_csv(C_mor.mig_rank,
+          '../Results/Tables/Supplementary table 06 - minmax normalized values.csv')
+```
+
+Plot.
+
+```{r}
+C_mor.mig_p <- 
+  C_mor.mig_rank |> 
+  mutate(`Heat tolerance` = case_when(`Heat tolerance` == "High" ~ "Thermotolerant",
+                                      `Heat tolerance` == "Low" ~ "Thermosensitive",
+                                      .default = `Heat tolerance`),
+         Species = if_else(Species == "A. tenuis", 
+                           "<i>A. </i>cf. <i>tenuis</i>", 
+                           paste0("<i>",Species,"</i>"))) |> 
+  ggplot() +
+  geom_bar(aes(x = reorder(`Colony`, -combined),
+               y = mor_norm),
+           stat = 'identity',
+           alpha = 0.15) +
+  geom_point(aes(x = reorder(`Colony`, -combined),
+               y = combined,
+               fill = fct_relevel(`Heat tolerance`, c("Thermosensitive",
+                                                      "Intermediate",
+                                                      "Thermotolerant"))),
+           shape = 21,
+           color = 'white',
+           size = 4) +
+  geom_point(aes(x = reorder(`Colony`, -combined),
+                 y = mig_norm),
+             size = 1,
+             alpha = 0.15)  +
+  facet_grid(cols = vars(fct_relevel(Species, c("<i>A. digitifera</i>",
+                                        "<i>A. millepora</i>",
+                                        "<i>A. </i>cf. <i>tenuis</i>"))),
+             scales = 'free',
+             space = 'free',
+             axes = "all") +
+  labs(y = 'Min-max normalized values',
+       fill = "Group") +
+  scale_fill_manual(values = Z_color_htol_int) +
+  scale_y_continuous(limits = c(0,2.1), 
+                     expand = expansion(0, 0)) +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        axis.title.x = element_blank(),
+        strip.background = element_blank(),
+        axis.line = element_line(),
+        strip.text = element_markdown(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        legend.background = element_rect(fill = 'transparent'),
+        legend.key = element_blank(),
+        plot.background = element_rect(fill = 'transparent'))
+```
+
+Export.
+
+```{r}
+#| eval: false
+ggsave(plot = C_mor.mig_p,
+       filename = '../Results/Figures/Figure 01C.png',
+       dpi = 900,
+       width = 11500, 
+       height = 3000, 
+       units = "px")
+```
