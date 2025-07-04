@@ -1,0 +1,269 @@
+---
+title: "Figure 1A"
+format: html
+theme: 
+  light: zephyr
+  dark: cyborg
+toc: true
+page-layout: full
+number-sections: true
+number-depth: 3
+editor: visual
+self-contained: true
+---
+
+# Figure 1A - KM curves
+
+This Quarto document contains the data manipulation and plot generation for Figure 1A of Quijano, et al., 2024.
+
+## Notes
+
+A naming convention for dataframes was made.
+
+1.  Dataframes were named with a prefix per section arranged alphabetically.
+2.  A 2nd prefix was added to arrange all the data accordingly:
+    -   Dataframes: df\_
+    -   Vectors: c\_
+    -   Plots: p\_
+    -   Trees: t\_
+    -   Stats: s\_
+3.  If a dataframe will be used multiple times in case a raw dataframe is needed and an edited one should not supersede the raw one, add a suffix at the end (i.e., \_1 for first edit, \_2 for second....).
+4.  Limit object names to three letters and if 2 words are needed, separate with ".".
+5.  If an object is just an auxiliary object, put a Z\_ prefix.
+
+## Import libraries
+
+```{r}
+pacman::p_load(tidyverse,
+               ggbeeswarm,
+               survminer,
+               survival,
+               cowplot,
+               broom)
+```
+
+## Import metadata
+
+```{r}
+#| warning: false
+
+A_df_met <- read_csv('../data/Fig01A_metadata.csv')
+```
+
+## Make a list of colors
+
+```{r}
+Z_c_col.ht.int <- c("#B2182B","gray", "#2166AC")
+Z_c_col.sp.int <- c('#221b1b',"#AA4c0a","#efb83a")
+```
+
+## Import mortality data
+
+Import mortality data in long format in 3 species of *Acropora*.
+
+```{r}
+#| warning: false
+
+B_c_mor <- 
+  list.files(path = '../data/',
+             recursive = F,
+             pattern = 'daily-survival.csv',
+             full.names = T)
+
+B_df_mor <- 
+  read_csv(B_c_mor,
+           id = 'file_name') |> 
+  select(!1) |> 
+  filter(!(Species %in% c("A. millepora","A. tenuis") & `Day elapsed` > 10))
+```
+
+```{r}
+#| echo: false
+B_df_mor
+```
+
+Among the Acropora species, only *A. tenuis* showed mortality in the control tanks during exposure. These will not be included in further analyses, cutting the A. tenuis colonies that will be included to 25.
+
+These colonies are: ATEN07, ATEN08, ATEN09, ATEN24, ATEN25.
+
+```{r}
+Z_c_mor.unr <- c("ATEN07","ATEN08","ATEN09","ATEN24","ATEN25")
+
+B_df_mor <- 
+  B_df_mor |> 
+  filter(!Colony %in% Z_c_mor.unr)
+```
+
+Filter data to only include thermally challenged setups. Note that control tanks were only set to check that stress is not confounded by handling stress.
+
+```{r}
+B_df_mor <- 
+  B_df_mor |> 
+  filter(Treatment == 'Heat-stressed')
+```
+
+## Kaplan-Meier curves
+
+Shape data to be appropriate for survival curves analysis.
+
+```{r}
+C_df_mor <-
+  B_df_mor |> 
+  select(c(1,4,5,7:9)) 
+
+# Make a tibble for A. millepora that extends to 13 days (for comparison with Adig)
+C_df_mor.am <- 
+  C_df_mor |> 
+  filter(Species == 'A. millepora') |> 
+  distinct(Colony,
+           .keep_all = T) |> 
+  mutate('Days elapsed 11' = 11,
+         'Days elapsed 12' = 12,
+         'Days elapsed 13' = 13,
+         `Healthy fragments` = NA) |> 
+  select(!`Day elapsed`) |> 
+  pivot_longer(cols = !c(1:5),names_to = 'Days',values_to = 'Day elapsed') |> 
+  select(!Days)
+
+# Make a tibble for A. millepora that extends to 13 days (for comparison with Adig)
+C_df_mor.at <- 
+  C_df_mor |> 
+  filter(Species == 'A. tenuis') |> 
+  distinct(Colony,
+           .keep_all = T) |> 
+  mutate('Days elapsed 11' = 11,
+         'Days elapsed 12' = 12,
+         'Days elapsed 13' = 13,
+         `Healthy fragments` = NA) |> 
+  select(!`Day elapsed`) |> 
+  pivot_longer(cols = !c(1:5),names_to = 'Days',values_to = 'Day elapsed') |> 
+  select(!Days)
+
+# Combine all tibbles
+C_df_mor_1 <- 
+  C_df_mor |> 
+  bind_rows(C_df_mor.am,
+            C_df_mor.at)|> 
+  mutate(`Healthy fragments` = case_when(`Healthy fragments` == NA ~ 1,
+                                         .default = `Healthy fragments`))
+```
+
+Make a dataframe that with status (censor).
+
+```{r}
+#| warning: false
+
+C_df_mor_2 <- 
+  C_df_mor_1 |> 
+  # Make a string, delimited by comma to make ID fragments
+  rowwise() %>%
+  mutate('Fragment ID' = paste0(Colony,
+                                '_',
+                                seq_len(`N fragment`), 
+                                collapse = ",")) %>%
+  ungroup() %>% 
+  # Separate them
+  separate(`Fragment ID`,
+           into = paste0("Fragment ID_", 
+                         1:max(str_count(.$`Fragment ID`, ",")) + 1),
+           sep = ",", 
+           remove = F,
+           extra = 'merge') |> 
+  separate(`Fragment ID_8`,
+           into = c('Fragment ID_9', 'Fragment ID_10'),
+           sep = ",", 
+           remove = T) |> 
+  # Remove Fragment ID
+  select(!`Fragment ID`) |> 
+  # Make tibble longer  
+  pivot_longer(cols = 7:14,
+               values_to = 'Fragment ID',
+               values_drop_na = T) |> 
+  select(!name) |> 
+  mutate('Fragment #' = str_sub(`Fragment ID`, -1, -1),
+         'Fragment #' = as.numeric(`Fragment #`)) |> 
+  mutate(status = case_when(`Healthy fragments` == NA ~ 1,
+                            `Healthy fragments` < `Fragment #` ~ 2,
+                            .default = 1)) |> 
+  
+  # Edit
+  filter(!(Species %in% c("A. millepora","A. tenuis") & `Day elapsed` > 10))
+```
+
+Make survival curve plot.
+
+```{r}
+# Fit data
+C_mor_km <- 
+  survfit(Surv(`Day elapsed`, status) ~ Species, data = C_df_mor_2)
+
+# Plot data
+C_mor_p <- 
+  ggsurvplot(C_mor_km,
+             conf.int = T, 
+             data = C_df_mor_2,
+             palette = Z_c_col.sp.int, 
+             censor.shape = NA, 
+             ylim = c(.6, 1),
+             size = 1.5,
+             legend = 'none',
+             ggtheme = Z_f_per.the)
+```
+
+Make a personalized theme.
+
+```{r}
+Z_f_per.the <- 
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        axis.title.x = element_blank(),
+        strip.background = element_blank(),
+        axis.line = element_line(),
+        strip.text = element_text(face = 'italic'),
+        legend.background = element_rect(fill = 'transparent'),
+        legend.key = element_blank(),
+        plot.background = element_rect(fill = 'transparent'),
+        panel.background = element_rect(fill = 'transparent'))
+```
+
+Export.
+
+```{r}
+#| echo: false
+C_mor_p
+```
+
+```{r}
+#| eval: false
+ggsave(filename = '../Results/Figures/Figure 01A - KM curves - 20250107.png',
+       dpi = 900,
+       width = 6000, 
+       height = 2000, 
+       units = "px")
+```
+
+## Log-rank test
+
+```{r}
+D_s_log.rank.glb <- 
+  surv_pvalue(C_mor_km,
+              data = C_df_mor_2)
+```
+
+Make a pairwise log-rank test.
+
+```{r}
+D_s_log.rank.pw <- 
+  pairwise_survdiff(Surv(`Day elapsed`, status) ~ Species,
+                    data = C_df_mor_2,
+                    p.adjust.method = 'BH') |> 
+  tidy()
+```
+
+Export.
+
+```{r}
+#| eval: false
+write_csv(D_s_log.rank.pw,
+          '../Results/Tables/Table 01.csv')
+```
