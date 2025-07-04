@@ -1,0 +1,609 @@
+---
+title: "Thermotolerance correlation with Symbiodiniaceae"
+format: html
+theme: 
+  light: zephyr
+  dark: cyborg
+toc: true
+page-layout: full
+number-sections: true
+number-depth: 3
+editor: visual
+self-contained: true
+---
+
+# Thermotolerance correlation with Symbiodiniaceae
+
+# Notes
+
+A naming convention for dataframes was made.
+
+1.  Objects were named with a prefix per section arranged alphabetically.
+2.  A 2nd prefix was added to arrange all the data accordingly:
+    -   Dataframes: .**1**
+    -   Plots: .**2**
+    -   Stats: .**3** (those in dataframe format)
+    -   Others:
+        -   Vectors: .**vec**
+        -   Trees: .**tre**
+        -   Distances: .**dis**
+        -   Functions: .**fun**
+3.  If a dataframe will be used multiple times in case a raw dataframe is needed and an edited one should not supersede the raw one, add a suffix at the end (i.e., **\_1** for first edit, **\_2** for second....).
+4.  Limit 3rd prefix names to three letters and if 2 prefixes are needed, separate with "**.**".
+5.  If an object is just an auxiliary object, put a **Z** prefix.
+
+```{r}
+pacman::p_load(tidyverse,           
+               janitor,
+               cowplot,
+               vegan,
+               pairwiseAdonis,
+               ggtext,
+               rstatix,
+               ggbeeswarm,
+               ggtree,
+               ape,
+               writexl)
+```
+
+# Load prior work
+
+```{r}
+load("Thermotolerance correlation with Symbiodiniaceae.RData")
+```
+
+# Load metadata
+
+```{r}
+#| warning: false
+
+
+A.1_mta.htl <- 
+  read_csv('../data/Fig02_LinkWithThermo.csv') |> 
+  pivot_wider(names_from = ThermotoleranceParameter,
+              values_from = ThermotoleranceMeasure) |> 
+  arrange(`Colony ID`)
+```
+
+Load ITS2 type profile.
+
+```{r}
+A.1_its2profile <- 
+  read_tsv('../data/Fig02_ITS2TypeProfiles.txt') |> 
+  row_to_names(6) |> 
+  rename(sample_name = 2,
+         uid = 1) |> 
+  drop_na() |> 
+  filter(!sample_name %in% Z.vec_mor.unr) |> 
+  mutate(sample_name = str_replace(sample_name, 'ADIG', 'D'),
+         sample_name = str_replace(sample_name, 'AMIL', 'M'),
+         sample_name = str_replace(sample_name, 'ATEN', 'T')) |> 
+  mutate(Species = case_when(str_detect(sample_name, 'D') ~ 'A. digitifera',
+                             str_detect(sample_name, 'M') ~ 'A. millepora',
+                             .default = 'A. tenuis'))
+
+A.1_its2profile_1 <- 
+  A.1_its2profile |> 
+  pivot_longer(!c(1,2,7),
+               names_to = 'ITS2TypeProfile',
+               values_to = 'Counts') |> 
+  mutate(Counts = if_else(Counts > 0, 1, 0)) |> 
+  filter(Counts == 1)
+```
+
+## Make a color scheme
+
+```{r}
+Z.vec_col.spc <- 
+  c("A. digitifera"='#221b1b',
+    "A. millepora"="#AA4c0a",
+    "A. tenuis"="#efb83a")
+Z.vec_col.htl <- c("Thermotolerant" = "#B2182B","Intermediate" = "gray","Thermosensitive" = "#2166AC")
+Z.vec_col.prf <- c("#203D3B","#6C9493","#F6E272","#F69312")
+Z.vec_col.dur <- c("#B2182B","#ececec")
+```
+
+## Clean metadata
+
+Among the Acropora species, only *A. tenuis* showed mortality in the control tanks during exposure. These will not be included in further analyses, cutting the A. tenuis colonies that will be included to 25.
+
+These colonies are: ATEN07, ATEN08, ATEN09, ATEN24, ATEN25.
+
+```{r}
+Z.vec_mor.unr <- c("ATEN07","ATEN08","ATEN09","ATEN24","ATEN25")
+```
+
+# Load Symportal results
+
+## Unifrac
+
+```{r}
+#| warning: false
+
+B.1_unifrac <- 
+  read_tsv('../data/Fig02_ITS2Unifrac.dist',
+           col_names = F) |> 
+  select(!2)
+```
+
+Tidy.
+
+```{r}
+B.vec_unifrac.names <- 
+  B.1_unifrac |>
+  pull(1)
+
+B.vec_unifrac.names_1 <- 
+  c('sample_name') |> 
+  append(B.vec_unifrac.names)
+```
+
+Rename df.
+
+```{r}
+B.1_unifrac_1 <- 
+  B.1_unifrac |> 
+  rename_with(~ B.vec_unifrac.names_1, everything())
+```
+
+Remove unidentified colonies and change ID names.
+
+```{r}
+B.1_unifrac_2 <- 
+  B.1_unifrac_1 |> 
+  filter(!sample_name %in% Z.vec_mor.unr) |> 
+  select(!one_of(Z.vec_mor.unr)) |> 
+  filter(!sample_name %in% Z.vec_mor.unr) |> 
+  mutate(sample_name = str_replace(sample_name, 'ADIG', 'D'),
+         sample_name = str_replace(sample_name, 'AMIL', 'M'),
+         sample_name = str_replace(sample_name, 'ATEN', 'T'))
+```
+
+Change to dist object.
+
+```{r}
+B.dis_unifrac <- 
+  B.1_unifrac_2 |>
+  column_to_rownames('sample_name') |> 
+  as.dist()
+```
+
+# PERMANOVA
+
+Test based on thermotolerance.
+
+```{r}
+C.3_unifrac.permanova.mmiom <- 
+  adonis2(B.dis_unifrac ~ mmIOM + mmCC,
+          data = A.1_mta.htl_1, 
+          permutations = 9999, 
+          by = "terms")
+
+C.3_unifrac.permanova.mmcc <- 
+  adonis2(B.dis_unifrac ~ mmCC,
+          data = A.1_mta.htl_1, 
+          permutations = 9999, 
+          by = "terms")
+
+C.3_unifrac.permanova.mmcombined <- 
+  adonis2(B.dis_unifrac ~ mmCombined,
+          data = A.1_mta.htl_1, 
+          permutations = 9999, 
+          by = "terms")
+```
+
+# dbRDA
+
+View data.
+
+```{r}
+C.3_dbrda <-
+  capscale(B.dis_unifrac ~ mmIOM + mmCC,
+           data = A.1_mta.htl)
+
+C.3_dbrda.perm <- 
+  anova(C.3_dbrda, permutations = 9999)
+
+C.3_dbrda.perm.terms <- 
+  anova(C.3_dbrda, by = "terms", permutations = 9999)
+
+###
+# Save
+C.3_dbrda.perm.terms |> 
+  as.data.frame() |> 
+  rownames_to_column("Thermotolerance parameter") |> 
+  write_xlsx("../Results/Tables/2025/dbRDA results per parameter.xlsx")
+
+###
+  
+C.3_dbrda.perm.axis <- 
+  anova(C.3_dbrda, by = "axis", permutations = 9999)
+
+C.3_dbrda.perm.margin <- 
+  anova(C.3_dbrda, by = "margin", permutations = 9999)
+
+C.3_dbrda.permanova <- 
+  adonis2(B.dis_unifrac ~ mmIOM + mmCC, 
+         data = A.1_mta.htl, 
+         permutations = 9999, 
+         by = "margin")
+```
+
+Get data.
+
+```{r}
+# Extract site scores and join with metadata
+C.1_sites <- as.data.frame(scores(C.3_dbrda, display = "sites")) %>%
+  rownames_to_column("Colony ID") %>%
+  as_tibble() %>%
+  left_join(A.1_mta.htl, by = "Colony ID")  # Make sure SampleID matches your metadata rownames or IDs
+
+# Extract constraint (environmental variable) scores (arrows)
+C.1_constraints <- as.data.frame(scores(C.3_dbrda, display = "bp")) %>%
+  rownames_to_column("Variable") %>%
+  as_tibble()
+
+# Calculate group centroids for Species (mean site scores per Species)
+C.1_centroids <- C.1_sites %>%
+  group_by(Species) %>%
+  summarise(PC1 = mean(CAP1), PC2 = mean(CAP2))
+```
+
+Plot.
+
+```{r}
+C.2_dbrda <- 
+  C.1_sites |> 
+  left_join((A.1_its2profile_1 |> 
+               rename("Colony ID" = sample_name) |> 
+               select(2, 4))) |> 
+  ggplot() +
+  # Plot sites, colored by Species
+  geom_point(aes(x = CAP1, 
+                 y = CAP2, 
+                 color = ITS2TypeProfile), 
+             size = 3) +
+  scale_shape_manual(values = c(21, 22, 24)) +
+  
+  # Plot group centroids for Species with bigger points and labels
+  
+  # Plot arrows for constraints (environmental variables)
+  geom_segment(data = C.1_constraints,
+               aes(x = 0, y = 0, xend = CAP1*0.3, yend = CAP2*0.3),
+               arrow = arrow(length = unit(0.2, "cm")),
+               color = "black") +
+  geom_text(data = C.1_constraints,
+            aes(x = CAP1*0.2, y = CAP2*0.2, label = Variable),
+            hjust = 0.5, vjust = -0.5, size = 4, color = "black") +
+  labs(x = "dbRDA1 (5.39%)",
+       y = "dbRDA2 (0.95%)",
+       fill = "Thermotolerance") +
+  scale_color_manual(values = Z.vec_col.prf) +
+  theme_minimal() +
+  theme(legend.position = "right",
+        axis.line = element_line(),
+        panel.grid = element_blank(),
+        axis.text = element_blank()) 
+```
+
+Save.
+
+```{r}
+C.2_dbrda |> 
+  ggsave(filename = "../Results/Figures/2025/dbrda_v1.svg", 
+         dpi = 900,
+         width = 4600,
+         height = 3000,
+         units = "px")
+```
+
+# Mantel
+
+Compute euclidean distance of color change.
+
+```{r}
+D.dis_colorchange <- 
+  dist(A.1_mta.htl$mmCC, method = "euclidean")
+
+D.dis_iom <- 
+  dist(A.1_mta.htl$mmIOM, method = "euclidean")
+
+D.dis_bi <- 
+  dist(A.1_mta.htl$mmCombined, method = "euclidean")
+```
+
+Do mantel test.
+
+```{r}
+D.3_colorchange.mantel <- 
+  mantel(B.dis_unifrac, D.dis_colorchange, method = "spearman", permutations = 9999)
+
+D.3_iom.mantel <- 
+  mantel(B.dis_unifrac, D.dis_iom, method = "spearman", permutations = 9999)
+
+D.3_bi.mantel <- 
+  mantel(B.dis_unifrac, D.dis_bi, method = "spearman", permutations = 9999)
+```
+
+Plot for color change.
+
+```{r}
+D.1_colorchange.mantel <- 
+  tibble(CommunityDist = as.vector(B.dis_unifrac),
+         ColorChange = as.vector(D.dis_colorchange),
+         BIDist = as.vector(D.dis_bi),
+         IOM = as.vector(D.dis_iom)) |> 
+  pivot_longer(!CommunityDist,
+               names_to = "ThermoToleranceParameter",
+               values_to = "Distance")
+
+
+D.2_colorchange.mantel <- 
+  ggplot(D.1_colorchange.mantel, aes(x = Distance, y = CommunityDist)) +
+  geom_point(alpha = 0.1) +
+  geom_smooth(method = "lm", color = "#C13A37", fill = "#EFCAC9", se = TRUE) +
+  facet_grid(cols = vars(fct_relevel(ThermoToleranceParameter, 
+                                c("ColorChange", "BIDist", "IOM"))),
+             scales = "free",
+             axes = "all") +
+  labs(
+    x = "Thermotolerance (distance)",
+    y = "ITS2 community dissimilarity"
+  ) +
+  scale_y_continuous(expand = c(0,0)) +
+  scale_x_continuous(expand = c(0,0)) +
+  theme_minimal() +
+  theme(panel.grid = element_blank(),
+        axis.line = element_line(),
+        axis.ticks = element_line())
+```
+
+Save.
+
+```{r}
+D.2_colorchange.mantel |> 
+  ggsave(filename = "../Results/Figures/2025/mantel.png", 
+         dpi = 900,
+         width = 10000,
+         height = 3000,
+         units = "px")
+```
+
+# PCoA per strain
+
+Load data.
+
+```{r}
+E.1_its2profile <- 
+  read_tsv('../data/Fig02_ITS2TypeProfiles.txt') |> 
+  row_to_names(6) |> 
+  rename(sample_name = 2,
+         uid = 1) |> 
+  drop_na() |> 
+  filter(!sample_name %in% Z.vec_mor.unr) |> 
+  mutate(sample_name = str_replace(sample_name, 'ADIG', 'D'),
+         sample_name = str_replace(sample_name, 'AMIL', 'M'),
+         sample_name = str_replace(sample_name, 'ATEN', 'T')) |> 
+  mutate(Species = case_when(str_detect(sample_name, 'D') ~ 'A. digitifera',
+                             str_detect(sample_name, 'M') ~ 'A. millepora',
+                             .default = 'A. tenuis'))
+
+E.1_its2profile_1 <- 
+  E.1_its2profile |> 
+  pivot_longer(!c(1,2,7),
+               names_to = 'ITS2TypeProfile',
+               values_to = 'Counts') |> 
+  mutate(Counts = if_else(Counts > 0, 1, 0)) |> 
+  filter(Counts == 1)
+```
+
+Merge with metadata.
+
+```{r}
+E.1_mta.htl <- 
+  A.1_mta.htl |> 
+  left_join((E.1_its2profile_1 |> select(sample_name, ITS2TypeProfile) |> 
+               rename("Colony ID" = sample_name)))
+```
+
+Do PCoA.
+
+```{r}
+E.1_wunifrac.pcoa <- 
+  B.dis_unifrac |>
+  cmdscale(eig = T) |> 
+  pluck('points') |> 
+  as.data.frame() |> 
+  rownames_to_column() |> 
+  rename("Colony ID" = 1) |> 
+  left_join(E.1_mta.htl) |> 
+  group_by(Species) |> 
+  # Get centroids
+  mutate(meanX = mean(V1),
+         meanY = mean(V2))
+
+# Get relative importance
+E.vec_wunifrac.pcoa <- 
+  B.dis_unifrac |>
+  cmdscale(eig = T) |> 
+  pluck('eig') |> 
+  as.data.frame() |>
+  rename(eig = 1) |>
+  mutate(rel_eig = eig/sum(eig) * 100) |>
+  pull(rel_eig)
+```
+
+Plot.
+
+```{r}
+E.2_wunifrac.pcoa <- 
+  E.1_wunifrac.pcoa |> 
+  ggplot() +
+  geom_hline(yintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_vline(xintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_point(aes(x = V1,
+                 y = V2,
+                 shape = Species,
+                 color = ITS2TypeProfile),
+             size = 3) +
+  labs(x = paste0('PCo1 (', 
+                  format(round(E.vec_wunifrac.pcoa[1],2), nsmall = 2),
+                  '%)'),
+       y = paste0('PCo2 (', 
+                  round(E.vec_wunifrac.pcoa[2],2),
+                  '%)')) + 
+  scale_color_manual(values = Z.vec_col.prf) +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+```
+
+Save.
+
+```{r}
+E.2_wunifrac.pcoa |> 
+  ggsave(filename = "../Results/Figures/2025/PCoA per strain.png", 
+         dpi = 900,
+         width = 5000,
+         height = 3000,
+         units = "px")
+```
+
+# Thermotolerance among strains
+
+Tidy data.
+
+```{r}
+F.1_profile <- 
+  E.1_mta.htl |> 
+  pivot_longer(!c(1,2,6),
+            names_to = "ThermotoleranceParameter",
+            values_to = "ThermotoleranceValue")
+```
+
+Plot.
+
+```{r}
+F.2_profile <- 
+  F.1_profile |> 
+  ggplot(aes(y = ITS2TypeProfile,
+             x = ThermotoleranceValue)) +
+  geom_quasirandom(method = 'pseudorandom',
+                   alpha = 0.2,
+                   size = 2, 
+                   width = 0.25,
+                   color = "black") +
+  facet_grid(cols = vars(fct_relevel(ThermotoleranceParameter, c("mmIOM", "mmCC", "mmCombined"))),
+             scales = "free") +
+  stat_summary(fun = 'median',
+               size = 1,
+               shape = 21,
+               color = 'white',
+               stroke = 0.75,
+               fill = "black") +
+  labs(x = "Thermotolerance parameter",
+       y = "ITS2 type profile") +
+  theme_minimal() +
+  theme(panel.grid = element_blank(),
+        axis.line = element_line(),
+        axis.ticks = element_line(),
+        panel.background = element_rect(color = "black"))
+```
+
+Stats.
+
+```{r}
+F.3_profile <- 
+  F.1_profile |> 
+  group_by(ThermotoleranceParameter) |> 
+  kruskal_test(ThermotoleranceValue ~ ITS2TypeProfile)
+
+F.3_profile.dunns <- 
+  F.1_profile |>
+  group_by(ThermotoleranceParameter) |> 
+  dunn_test(ThermotoleranceValue ~ ITS2TypeProfile)
+
+###
+# Save
+F.3_profile.dunns |> 
+  as.data.frame() |> 
+  write_xlsx("../Results/Tables/2025/Thermotolerance parameter per ITS2 profile.xlsx")
+
+###
+```
+
+Save.
+
+```{r}
+F.2_profile |> 
+  ggsave(filename = "../Results/Figures/2025/Thermotolerance among profiles.png", 
+         dpi = 900,
+         width = 5250,
+         height = 3350,
+         units = "px")
+```
+
+# Profile distance
+
+Load data
+
+```{r}
+G.1_profile.distance <- 
+  read_delim("../data/Fig02_ITS2Unifrac.dist", delim = "\t",col_names = F)
+```
+
+Tidy data.
+
+```{r}
+G.1_profile.distance_1 <- 
+  G.1_profile.distance |> 
+  select(!2) %>% 
+  column_to_rownames("X1") |> 
+  rename_with(~ (pull(G.1_profile.distance, 1)), everything())
+
+G.mat_profile.distance <- 
+  G.1_profile.distance_1 |> 
+  as.matrix() |> 
+  as.dist()
+```
+
+Plot.
+
+```{r}
+G.tre_profile.distance <- 
+  G.mat_profile.distance |> 
+  hclust(method = "average")
+
+G.2_profile.distance <- 
+  G.tre_profile.distance |> 
+  ggtree(branch.length = T) +
+  geom_tiplab(align = T,
+              linetype = "dotted",
+              linewidth = 0.25) +
+  xlim(-0.005, max(G.tre_profile.distance$height) * 1.5) +
+  theme_minimal() +
+  theme(panel.grid = element_blank(),
+        axis.text = element_blank())
+```
+
+Save.
+
+```{r}
+G.2_profile.distance |> 
+  ggsave(filename = "../Results/Figures/2025/Thermotolerance among profiles - Tree.png", 
+         dpi = 900,
+         width = 2000,
+         height = 1650,
+         units = "px")
+```
+
+# Save work
+
+```{r}
+save.image("Thermotolerance correlation with Symbiodiniaceae.RData")
+```
