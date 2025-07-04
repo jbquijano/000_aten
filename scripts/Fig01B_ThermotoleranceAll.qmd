@@ -1,0 +1,242 @@
+---
+title: "Comparison of thermotolerance parameters"
+format: html
+theme: 
+  light: zephyr
+  dark: cyborg
+toc: true
+page-layout: full
+number-sections: true
+number-depth: 3
+editor: visual
+self-contained: true
+---
+
+# Notes
+
+A naming convention for dataframes was made.
+
+1.  Objects were named with a prefix per section arranged alphabetically.
+2.  A 2nd prefix was added to arrange all the data accordingly:
+    -   Dataframes: .**1**
+    -   Plots: .**2**
+    -   Stats: .**3** (those in dataframe format)
+    -   Others:
+        -   Vectors: .**vec**
+        -   Trees: .**tre**
+        -   Distances: .**dis**
+        -   Functions: .**fun**
+3.  If a dataframe will be used multiple times in case a raw dataframe is needed and an edited one should not supersede the raw one, add a suffix at the end (i.e., **\_1** for first edit, **\_2** for second....).
+4.  Limit 3rd prefix names to three letters and if 2 prefixes are needed, separate with "**.**".
+5.  If an object is just an auxiliary object, put a **Z** prefix.
+
+# Load pkgs
+
+```{r}
+pacman::p_load(tidyverse,
+               ggtext,
+               ggbeeswarm,
+               rstatix)
+```
+
+# Load prior work
+
+```{r}
+load("Comparison of thermotolerance parameters.RData")
+```
+
+# Load data
+
+```{r}
+A.1_thermo.params <- 
+  read_csv("../Results/Tables/Supplementary table 06 - minmax normalized values.csv") |> 
+  rename("Colony ID" = Colony) |> 
+  select(1:4) |> 
+  rename("IOM" = 3,
+         "CC" = 4)
+
+A.1_IOMD10 <- 
+  read_csv("../Results/Tables/IOM at day 10.csv") |> 
+  select(5,1,10)|> 
+  mutate(Colony = str_replace(Colony, 'ADIG', 'D'),
+         Colony = str_replace(Colony, 'AMIL', 'M'),
+         Colony = str_replace(Colony, 'ATEN', 'T')) |> 
+  rename("Colony ID" = Colony,
+         "IOMD10" = 3)
+
+A.1_thermo.params_1 <- 
+  A.1_thermo.params |> 
+  left_join(A.1_IOMD10)
+```
+
+Tidy.
+
+```{r}
+Z.fun_minmax <- 
+  function(x) {
+  (x - min(x, na.rm = TRUE)) / (max(x, na.rm = TRUE) - min(x, na.rm = TRUE))
+}
+
+Z.vec_mor.unr <- c("T07","T08","T09","T24","T25")
+
+B.1_thermo.params <- 
+  A.1_thermo.params_1 |> 
+  filter(!`Colony ID` %in% Z.vec_mor.unr) |> 
+  mutate(mmIOM = Z.fun_minmax(IOMD10),
+         mmCC = Z.fun_minmax(CC)) |> 
+  rowwise() |> 
+  mutate(mmCombined = mmIOM + mmCC) |> 
+  ungroup()
+```
+
+# Plot
+
+Make a list of colors.
+
+```{r}
+Z.vec_col.sp <- c("Adig"='#221b1b',
+                   "Amil"="#AA4c0a",
+                   "Aten"="#efb83a")
+```
+
+Among the Acropora species, only *A. tenuis* showed mortality in the control tanks during exposure. These will not be included in further analyses, cutting the A. tenuis colonies that will be included to 25.
+
+These colonies are: ATEN07, ATEN08, ATEN09, ATEN24, ATEN25.
+
+```{r}
+C.1_thermo.params <- 
+  B.1_thermo.params |> 
+  select(!c(3:5)) |> 
+  pivot_longer(!c(1:2),
+               names_to = "ThermotoleranceParameter",
+               values_to = "ThermotoleranceMeasure")
+```
+
+Save.
+
+```{r}
+C.1_thermo.params |> 
+  write_csv("../data/Fig01B_ThermotoleranceAll.csv")
+```
+
+Plot.
+
+```{r}
+C.2_thermo.params <- 
+  C.1_thermo.params |> 
+  mutate(Species = case_when(Species == "A. tenuis" ~ "Aten",
+                             Species == "A. millepora" ~ "Amil",
+                             .default = "Adig")) |> 
+  ggplot(aes(x = fct_relevel(Species, c("Adig",
+                                        "Amil",
+                                        "Aten")),
+             group = Species,
+             y = ThermotoleranceMeasure,
+             fill = Species,
+             color = Species)) +
+  geom_quasirandom(method = 'pseudorandom',
+                   alpha = 0.25,
+                   size = 2, 
+                   width = 0.25) +
+  facet_wrap(~ fct_relevel(ThermotoleranceParameter, c("mmIOM", "mmCC", "mmCombined")),
+             scale = "free",
+             axes = "all") +
+  stat_summary(fun = 'median',
+               size = 1,
+               shape = 21,
+               color = 'white',
+               stroke = 0.75) +
+  ylab(label = 'Min-max normalized values') +
+  scale_fill_manual(values = Z.vec_col.sp) +
+  scale_color_manual(values = Z.vec_col.sp) +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        axis.title.x = element_blank(),
+        strip.background = element_blank(),
+        axis.line = element_line(),
+        axis.text.x = element_markdown(),
+        axis.ticks.x = element_blank(),
+        legend.background = element_rect(fill = 'transparent'),
+        legend.key = element_blank(),
+        plot.background = element_rect(fill = 'transparent', color = "transparent"),
+        legend.title = element_blank(),
+        legend.text = element_markdown(),
+        legend.position = "none")
+```
+
+Export.
+
+```{r}
+ggsave(C.2_thermo.params,
+       filename = '../Results/Figures/2025/Comparison of thermotolerance parameters.png',
+       dpi = 900,
+       width = 4250, 
+       height = 2200, 
+       units = "px")
+```
+
+# Stats
+
+Kruskal-Wallis.
+
+```{r}
+D.3_kruskal <- 
+  C.1_thermo.params |> 
+  group_by(ThermotoleranceParameter) |> 
+  kruskal_test(ThermotoleranceMeasure ~ Species)
+```
+
+Dunn's test.
+
+```{r}
+E.3_dunns <- 
+  C.1_thermo.params |> 
+  group_by(ThermotoleranceParameter) |> 
+  dunn_test(ThermotoleranceMeasure ~ Species,
+            p.adjust.method = 'BH')
+```
+
+Median and IQR.
+
+```{r}
+F.1_median.iqr <- 
+  C.1_thermo.params |> 
+  group_by(Species, ThermotoleranceParameter) |> 
+  summarise(Q1 = round(quantile(ThermotoleranceMeasure, 0.25),2),
+            Q3 = round(quantile(ThermotoleranceMeasure, 0.75),2),
+            Median = median(ThermotoleranceMeasure)) |> 
+  mutate(IQR_range = paste0(Q1, " - ", Q3))
+```
+
+Export.
+
+```{r}
+#| eval: false
+write_csv(E.3_dunns,
+          '../Results/Tables/2025/Dunns test.csv')
+```
+
+## Summary stats
+
+```{r}
+G.1_sum.stats <- 
+  C.1_thermo.params |> 
+  group_by(Species, ThermotoleranceParameter) |> 
+  summarise(Q1 = round(quantile(ThermotoleranceMeasure, 0.25),2),
+            Q3 = round(quantile(ThermotoleranceMeasure, 0.75),2),
+            Median = median(ThermotoleranceMeasure)) |> 
+  mutate(IQR_range = paste0(Q1, " - ", Q3))
+```
+
+Export.
+
+```{r}
+G.1_sum.stats |> 
+  write_csv('../Results/Tables/2025/Thermotolerance parameters - Summary stats.csv')
+```
+
+# Save work
+
+```{r}
+save.image("Comparison of thermotolerance parameters.RData")
+```
