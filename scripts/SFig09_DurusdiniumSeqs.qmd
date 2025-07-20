@@ -1,0 +1,212 @@
+---
+title: "Figure 02"
+format: html
+theme: 
+  light: zephyr
+  dark: cyborg
+toc: true
+page-layout: full
+number-sections: true
+number-depth: 3
+editor: visual
+self-contained: true
+---
+
+# Figure 02 - ITS2 heatmap
+
+This Quarto document contains the data manipulation and plot generation for Supplementary figure 02.
+
+## Notes
+
+A naming convention for dataframes was made.
+
+1.  Dataframes were named with a prefix per section arranged alphabetically.
+2.  A 2nd prefix was added to arrange all the data accordingly:
+    -   Dataframes: df\_
+    -   Vectors: c\_
+    -   Plots: p\_
+    -   Trees: t\_
+    -   Stats: s\_
+    -   Distances: d\_
+3.  If a dataframe will be used multiple times in case a raw dataframe is needed and an edited one should not supersede the raw one, add a suffix at the end (i.e., \_1 for first edit, \_2 for second....).
+4.  Limit object names to three letters and if 2 words are needed, separate with ".".
+5.  If an object is just an auxiliary object, put a Z\_ prefix.
+
+# Import libraries
+
+```{r}
+pacman::p_load(tidyverse,           
+               janitor,
+               cowplot)
+```
+
+# Import metadata
+
+```{r}
+#| warning: false   
+
+A_df_mta.its <-   
+  read_tsv('../data/Fig03_ITS2.txt') |> 
+  drop_na()
+
+A_df_mta.prf <- 
+  read_tsv('../data/Fig02_ITS2TypeProfiles.txt')
+
+A_df_mta.htl <- 
+  read_csv('../data/SFig09_Metadata.csv')
+```
+
+# Load work
+
+```{r}
+load("Durusdinium sequences.RData")
+```
+
+## Clean metadata
+
+Among the Acropora species, only *A. tenuis* showed mortality in the control tanks during exposure. These will not be included in further analyses, cutting the A. tenuis colonies that will be included to 25.
+
+These colonies are: ATEN07, ATEN08, ATEN09, ATEN24, ATEN25.
+
+```{r}
+Z_c_mor.unr <- c("ATEN07","ATEN08","ATEN09","ATEN24","ATEN25")
+```
+
+```{r}
+A_df_mta.its <- 
+  A_df_mta.its |> 
+  filter(!sample_name %in% Z_c_mor.unr) |> 
+  mutate(sample_name = str_replace(sample_name, 'ADIG', 'D'),
+         sample_name = str_replace(sample_name, 'AMIL', 'M'),
+         sample_name = str_replace(sample_name, 'ATEN', 'T')) |> 
+  mutate(Species = case_when(str_detect(sample_name, 'D') ~ 'A. digitifera',
+                             str_detect(sample_name, 'M') ~ 'A. millepora',
+                             .default = 'A. tenuis'))
+
+A_df_mta.prf <- 
+  A_df_mta.prf |> 
+  row_to_names(6) |> 
+  rename(sample_name = 2,
+         uid = 1) |> 
+  drop_na() |> 
+  filter(!sample_name %in% Z_c_mor.unr) |> 
+  mutate(sample_name = str_replace(sample_name, 'ADIG', 'D'),
+         sample_name = str_replace(sample_name, 'AMIL', 'M'),
+         sample_name = str_replace(sample_name, 'ATEN', 'T')) |> 
+  mutate(Species = case_when(str_detect(sample_name, 'D') ~ 'A. digitifera',
+                             str_detect(sample_name, 'M') ~ 'A. millepora',
+                             .default = 'A. tenuis'))
+```
+
+## Make a color scheme
+
+```{r}
+Z_c_col.spc <- c("#294557","#558981","#C6BF88")
+Z_c_col.htl <-
+  c("Thermotolerant"="#B2182B",
+    "Intermediate"="gray",
+    "Thermosensitive"="#2166AC")
+Z_c_col.prf <- c("C3/C3u-C115-C21ab-C3ge" = "#203D3B",
+                 "C3u-C3-C115-C3xt" = "#6C9493",
+                 "C3u-C3xu-C3-C115" = "#F6E272",
+                 "C3u-C3xu-C3-C115-C3xv"="#F69312")
+Z_c_col.dur <- c("#B2182B","#ececec")
+```
+
+## Add info
+
+Add heat tolerance classification info.
+
+```{r}
+A_df_mta.its <- 
+  A_df_mta.its |> 
+  left_join(A_df_mta.htl |> 
+              rename(sample_name = Colony))
+
+A_df_mta.prf <- 
+  A_df_mta.prf |> 
+  left_join(A_df_mta.htl |> 
+              rename(sample_name = Colony))
+```
+
+# EDA
+
+## *Durusdinium* only
+
+Make a dataframe with *Durusdinium* sequences only.
+
+```{r}
+B_df_its.Dur <- 
+  A_df_mta.its |> 
+  pivot_longer(73:79,
+               names_to = 'DurusSeqs',
+               values_to = 'Count') |> 
+  select(2,35, 80:83)
+```
+
+Plot.
+
+```{r}
+B_2_its.Dur <- 
+  B_df_its.Dur |> 
+  ggplot(aes(x = fct_reorder(sample_name, Ranking),
+             y = DurusSeqs,
+             fill = Count)) +
+  geom_tile() +
+  facet_grid(cols = vars(host_species),
+             space = "free",
+             scales = "free",
+             axes = "all") +
+  scale_y_discrete(expand = c(0,0)) +
+  scale_x_discrete(expand = c(0,0)) +
+  scale_fill_distiller(palette = "RdPu") +
+  theme_minimal() +
+  theme(panel.grid = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        axis.ticks = element_line(),
+        axis.line = element_line())
+
+B_2_its.Dur2 <- 
+  B_df_its.Dur |> 
+  ggplot(aes(x = fct_reorder(sample_name, Ranking),
+             y = DurusSeqs,
+             fill = Count)) +
+  geom_tile() +
+  facet_grid(cols = vars(host_species),
+             space = "free",
+             scales = "free",
+             axes = "all") +
+  scale_y_discrete(expand = c(0,0)) +
+  scale_x_discrete(expand = c(0,0)) +
+  scale_fill_distiller(palette = "RdPu") +
+  theme_minimal() +
+  theme(panel.grid = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        axis.ticks = element_line(),
+        axis.line = element_line(),
+        legend.position = "bottom")
+```
+
+Save.
+
+```{r}
+ggsave(B_2_its.Dur,
+       filename = '../Results/Figures/2025/Durusdinium sequences.png',
+       dpi = 900,
+       width = 12000, 
+       height = 1500, 
+       units = "px")
+
+B_2_its.Dur2 |> 
+  ggsave(filename = '../Results/Figures/2025/Durusdinium sequences 2.png',
+       dpi = 900,
+       width = 12000, 
+       height = 1500, 
+       units = "px")
+```
+
+# Save work
+
+```{r}
+save.image("Durusdinium sequences.RData")
+```

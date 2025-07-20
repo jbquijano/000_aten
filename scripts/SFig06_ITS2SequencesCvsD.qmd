@@ -1,0 +1,231 @@
+---
+title: "Supplementary figure 05 and supplementary table 07 & 08"
+format: html
+theme: 
+  light: zephyr
+  dark: cyborg
+toc: true
+page-layout: full
+number-sections: true
+number-depth: 3
+editor: visual
+self-contained: true
+---
+
+# Supplementary figure 04
+
+This Quarto document contains the data manipulation and plot generation for Supplementary figure 05 and supplementary table 07 & 08 of Quijano, et al., 2024.
+
+## Notes
+
+A naming convention for dataframes was made.
+
+1.  Dataframes were named with a prefix per section arranged alphabetically.
+2.  A 2nd prefix was added to arrange all the data accordingly:
+    -   Dataframes: df\_
+    -   Vectors: c\_
+    -   Plots: p\_
+    -   Trees: t\_
+    -   Stats: s\_
+    -   Distances: d\_
+3.  If a dataframe will be used multiple times in case a raw dataframe is needed and an edited one should not supersede the raw one, add a suffix at the end (i.e., \_1 for first edit, \_2 for second....).
+4.  Limit object names to three letters and if 2 words are needed, separate with ".".
+5.  If an object is just an auxiliary object, put a Z\_ prefix.
+
+# Import libraries
+
+```{r}
+pacman::p_load(tidyverse,           
+               janitor,
+               cowplot)
+```
+
+# Import metadata
+
+```{r}
+#| warning: false   
+
+
+A_df_mta <-   
+  read_tsv('../data/Fig03_ITS2.txt')
+```
+
+## Clean metadata
+
+Among the Acropora species, only *A. tenuis* showed mortality in the control tanks during exposure. These will not be included in further analyses, cutting the A. tenuis colonies that will be included to 25.
+
+These colonies are: ATEN07, ATEN08, ATEN09, ATEN24, ATEN25.
+
+```{r}
+Z_c_mor.unr <- c("ATEN07","ATEN08","ATEN09","ATEN24","ATEN25")
+```
+
+Remove these colonies.
+
+```{r}
+A_df_mta <- 
+  A_df_mta |> 
+  filter(!sample_name %in% Z_c_mor.unr) |> 
+  drop_na() |> 
+  mutate(sample_name = str_replace(sample_name, 'ADIG', 'D'),
+         sample_name = str_replace(sample_name, 'AMIL', 'M'),
+         sample_name = str_replace(sample_name, 'ATEN', 'T')) |> 
+  mutate(Species = case_when(str_detect(sample_name, 'D') ~ 'A. digitifera',
+                             str_detect(sample_name, 'M') ~ 'A. millepora',
+                             .default = 'A. tenuis'))
+```
+
+# Symbiodiniaceae genera
+
+## Extract relevant info
+
+Get columns with sequence information.
+
+```{r}
+B_df_gns <- 
+  A_df_mta |> 
+  select(sample_name,Species,
+         C3u:D17d) |> 
+  rowwise() |> 
+  mutate(Cladocopium = sum(across(C3u:`374365_C`)),
+         Durusdinium = sum(across(D1:D17d)))
+```
+
+Get sum per sequence.
+
+```{r}
+B_df_gns.sum <- 
+  A_df_mta |> 
+  select(sample_name,Species,
+         C3u:D17d) |> 
+  pivot_longer(!c(1,2),
+               names_to = 'ITS2Sequence',
+               values_to = 'Count') |> 
+  group_by(ITS2Sequence) |> 
+  summarise(Total = sum(Count)) |> 
+  mutate(Genus = if_else(str_detect(ITS2Sequence, 'C'), 
+                         'Cladocopium',
+                         'Durusdinium')) |> 
+  arrange(desc(Total))
+```
+
+Get top *Cladocopium* sequences.
+
+```{r}
+B_c_cld.top <- 
+  B_df_gns.sum |> 
+  slice(1:7) |> 
+  pull(ITS2Sequence)
+```
+
+Get *Durusdinium sequences.*
+
+```{r}
+B_c_drs <- 
+  B_df_gns.sum |> 
+  filter(Genus == 'Durusdinium') |> 
+  pull(ITS2Sequence)
+```
+
+Append sequences from both genera.
+
+```{r}
+B_c_gns <- 
+  B_c_cld.top |> 
+  append(B_c_drs)
+```
+
+Tag top *Cladocopium* sequences and relevant *Durusdinium* sequences.
+
+```{r}
+B_df_gns.sum_1 <- 
+  B_df_gns.sum |> 
+  mutate(Grouping = if_else(ITS2Sequence %in% B_c_gns,
+                            ITS2Sequence,
+                            'Others'))
+```
+
+## Plot
+
+```{r}
+B_p_gns.sum <- 
+  B_df_gns.sum_1 |> 
+  ggplot(aes(x = Genus,
+             y = Total,
+             fill = fct_relevel(Grouping,
+                                B_c_gns |> append('Others')))) +
+  geom_bar(stat = 'identity') +
+  labs(fill = 'ITS2 Sequence',
+       y = 'Sequence count') +
+  scale_y_continuous(labels = scales::comma,
+                     expand = c(0,0),
+                     limits = c(0,8500000)) +
+  scale_fill_manual(values = c("#134130FF","#4C825DFF","#8CAE9EFF","#8DC7DCFF"
+                               ,"#508CA7FF","#1A5270FF","#0E2A4DFF",
+                               "#92351EFF","#B9563FFF","#D37750FF","#E69C6BFF",
+                               "#ECB27DFF","#F2C88FFF","#FBE3C2FF"
+                               ,"#2c2d2d")) +
+  theme(axis.text.x = element_text(face = 'italic'),
+        panel.grid = element_blank(),
+        axis.title.x = element_blank(),
+        strip.background = element_blank(),
+        axis.line = element_line(),
+        panel.background = element_rect(fill = '#FAFAFA'),
+        panel.grid.major.y = element_line(colour = '#dedede',
+                                              linewidth = 0.25),
+        strip.text = element_text(face = 'italic'),
+        legend.background = element_rect(fill = 'transparent'),
+        plot.background = element_rect(fill = 'transparent'))
+
+B_p_gns.sum.drs <- 
+  B_df_gns.sum_1 |> 
+  filter(Genus == 'Durusdinium')|> 
+  ggplot(aes(x = Genus,
+             y = Total,
+             fill = fct_relevel(Grouping,
+                                B_c_drs))) +
+  geom_bar(stat = 'identity') +
+  labs(fill = 'ITS2 Sequence',
+       y = 'Sequence count') +
+  scale_y_continuous(labels = scales::comma,
+                     expand = c(0,0),
+                     limits = c(0,200)) +
+  scale_fill_manual(values = c("#92351EFF","#B9563FFF","#D37750FF","#E69C6BFF",
+                               "#ECB27DFF","#F2C88FFF","#FBE3C2FF")) +
+  theme(axis.text.x = element_text(face = 'italic'),
+        panel.grid = element_blank(),
+        axis.title.x = element_blank(),
+        strip.background = element_blank(),
+        axis.line = element_line(),
+        panel.background = element_rect(fill = '#FAFAFA'),
+        panel.grid.major.y = element_line(colour = '#dedede',
+                                              linewidth = 0.25),
+        strip.text = element_text(face = 'italic'),
+        legend.background = element_rect(fill = 'transparent'),
+        plot.background = element_rect(fill = 'transparent'))
+
+B_p_gns.sum_1 <- 
+  plot_grid(B_p_gns.sum,
+            B_p_gns.sum.drs,
+            ncol = 2,
+            rel_widths = c(1.35,1))
+```
+
+Export.
+
+```{r}
+ggsave(B_p_gns.sum_1,
+       filename = '../Results/Figures/Supplementary figure 05.png',
+       dpi = 900,
+       width = 6500, 
+       height = 4000, 
+       units = "px")
+```
+
+## Tabulate
+
+```{r}
+write_csv(B_df_gns.sum_1 |> 
+            select(!Grouping),
+          '../Results/Tables/Supplementary table 07.csv')
+```

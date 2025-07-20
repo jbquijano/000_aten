@@ -1,0 +1,108 @@
+---
+title: "Supplementary figure 01"
+format: html
+theme: 
+  light: zephyr
+  dark: cyborg
+toc: true
+page-layout: full
+number-sections: true
+number-depth: 3
+editor: visual
+self-contained: true
+---
+
+# Supplementary figure 1
+
+This Quarto document contains the data manipulation and plot generation for Supplementary figure 1 of Quijano, et al., 2024.
+
+## Import libraries
+
+```{r}
+pacman::p_load(tidyverse,
+               janitor)
+```
+
+## Import data
+
+```{r}
+A.SurvDaily.df.raw <- 
+  readxl::read_xlsx('../data/SFig01_ExcludedColonies.xlsx')
+```
+
+## Manipulate data
+
+Get list of colony IDs with bleaching at control.
+
+```{r}
+A.SurvDaily.BleachControl.c.edit <- 
+  A.SurvDaily.df.raw |> 
+  filter(Treatment == 'Control') |>  # to get control data only
+  filter(`Bleached fragments` > 0) |>  # tog get colonies with bleaching in control
+  pull(Colony) |> 
+  unique()
+```
+
+Export "Unclassified" colonies.
+
+```{r}
+A.SurvDaily.BleachControl.c.edit1 <- 
+  tibble('Colony ID' = A.SurvDaily.BleachControl.c.edit,
+         Classification = 'Unclassified')
+
+write_csv(A.SurvDaily.BleachControl.c.edit1,
+          '../Results/Tables/Supplementary table 02.csv')
+```
+
+Get all colony IDs.
+
+```{r}
+A.SurvDaily.All.c.edit <- 
+  A.SurvDaily.df.raw |> 
+  pull(Colony) |> 
+  unique()
+```
+
+Make a dataframe.
+
+```{r}
+A.SurvDaily.df.edit <- 
+  tibble(Colony = A.SurvDaily.All.c.edit,
+         Status = 'No fragment mortality at control',
+         Count = 1) |> 
+  mutate(Status = if_else(Colony %in% A.SurvDaily.BleachControl.c.edit,
+                             'Fragment mortality at control',
+                             Status),
+         Species = case_when(str_detect(Colony, 'ATEN')~'A. tenuis',
+                             str_detect(Colony, 'ADIG')~'A. digitifera',
+                             .default = 'A. millepora')) 
+```
+
+## Plot
+
+```{r}
+A.SurvDaily.p <- 
+  A.SurvDaily.df.edit |> 
+  ggplot(aes(x = Species,
+             y = Count,
+             fill = Status)) +
+  geom_bar(stat = 'identity') +
+  ylab(label = 'Colony count') +
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_fill_manual(values = c("lightgray", "black")) +
+  theme_classic() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_text(face = 'italic'),
+        legend.title = element_blank())
+```
+
+Export plot.
+
+```{r}
+ggsave(A.SurvDaily.p,
+       filename = '../Results/Figures/Supplementary figure 01.png',
+       dpi = 900,
+       width = 5000, 
+       height = 3000, 
+       units = "px")
+```

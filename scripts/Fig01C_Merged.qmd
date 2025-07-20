@@ -48,7 +48,7 @@ Z_color_htol_int <-
 
 ```{r}
 B_mor_df <- 
-  read_csv('../data/Fig01C_Merged_Mortality.csv')
+  read_csv('../data/Figure01C_Merged_Mortality.csv')
 
 B_mor_df <- 
   B_mor_df |> 
@@ -59,7 +59,7 @@ B_mor_df <-
 
 ```{r}
 B_mig_df <- 
-  read_csv('../data/Fig01C_Merged_MIG.csv')
+  read_csv('../data/Figure01C_Merged_MIG.csv')
 
 B_mig_df <- 
   B_mig_df |> 

@@ -1,0 +1,2063 @@
+---
+title: "Table 02, Supplementary table 08 and Supplementary figure 06 & 07"
+format: html
+theme: 
+  light: zephyr
+  dark: cyborg
+toc: true
+page-layout: full
+number-sections: true
+number-depth: 3
+editor: visual
+self-contained: true
+---
+
+# PCoA, PERMANOVA
+
+This Quarto document contains the data manipulation and plot generation for Table 02 and Supplementary figure 06 of Quijano, et al.
+
+## Notes
+
+A naming convention for dataframes was made.
+
+1.  Dataframes were named with a prefix per section arranged alphabetically.
+2.  A 2nd prefix was added to arrange all the data accordingly:
+    -   Dataframes: df\_
+    -   Vectors: c\_
+    -   Plots: p\_
+    -   Trees: t\_
+    -   Stats: s\_
+    -   Distances: d\_
+3.  If a dataframe will be used multiple times in case a raw dataframe is needed and an edited one should not supersede the raw one, add a suffix at the end (i.e., \_1 for first edit, \_2 for second....).
+4.  Limit object names to three letters and if 2 words are needed, separate with ".".
+5.  If an object is just an auxiliary object, put a Z\_ prefix.
+
+# Import libraries
+
+```{r}
+pacman::p_load(tidyverse,           
+               janitor,
+               cowplot,
+               vegan,
+               pairwiseAdonis,
+               ggtext)
+```
+
+# Import metadata
+
+```{r}
+#| warning: false
+
+
+A_df_mta.htl <- 
+  read_csv('../data/Fig01B_ThermotoleranceAll.csv') |> 
+  rename("Colony ID" = Colony)
+```
+
+## Make a color scheme
+
+```{r}
+Z_c_col.spc <- 
+  c("A. digitifera"='#221b1b',
+    "A. millepora"="#AA4c0a",
+    "A. tenuis"="#efb83a")
+Z_c_col.htl <- c("Thermotolerant" = "#B2182B","Intermediate" = "gray","Thermosensitive" = "#2166AC")
+Z_c_col.prf <- c("#203D3B","#6C9493","#F6E272","#F69312")
+Z_c_col.dur <- c("#B2182B","#ececec")
+```
+
+## Clean metadata
+
+Among the Acropora species, only *A. tenuis* showed mortality in the control tanks during exposure. These will not be included in further analyses, cutting the A. tenuis colonies that will be included to 25.
+
+These colonies are: ATEN07, ATEN08, ATEN09, ATEN24, ATEN25.
+
+```{r}
+Z_c_mor.unr <- c("ATEN07","ATEN08","ATEN09","ATEN24","ATEN25")
+```
+
+# Import Symportal results
+
+## Bray-Curtis
+
+```{r}
+#| warning: false
+
+B_df_bc <- 
+  read_tsv('../data/Fig00_ITS2BrayCurtis.dist',
+           col_names = F) |> 
+  select(!2)
+```
+
+### Clean
+
+Get ID names.
+
+```{r}
+B_c_bc.nam <- 
+  B_df_bc |>
+  pull(1)
+
+B_c_bc.nam_1 <- 
+  c('sample_name') |> 
+  append(B_c_bc.nam)
+```
+
+Rename df.
+
+```{r}
+B_df_bc_1 <- 
+  B_df_bc |> 
+  rename_with(~ B_c_bc.nam_1, everything())
+```
+
+Remove unidentified colonies and change ID names.
+
+```{r}
+B_df_bc_1 <- 
+  B_df_bc_1 |> 
+  filter(!sample_name %in% Z_c_mor.unr) |> 
+  select(!one_of(Z_c_mor.unr)) |> 
+  filter(!sample_name %in% Z_c_mor.unr) |> 
+  mutate(sample_name = str_replace(sample_name, 'ADIG', 'D'),
+         sample_name = str_replace(sample_name, 'AMIL', 'M'),
+         sample_name = str_replace(sample_name, 'ATEN', 'T'))
+```
+
+Change to dist object.
+
+```{r}
+B_d_bc <- 
+  B_df_bc_1 |>
+  column_to_rownames('sample_name') |> 
+  as.dist()
+```
+
+### Species PCoA
+
+```{r}
+#| warning: false
+
+
+# Do PcoA
+B_df_bc.pco <- 
+  B_d_bc |>
+  cmdscale(eig = T) |> 
+  pluck('points') |> 
+  as.data.frame() |> 
+  rownames_to_column() |> 
+  rename("Colony ID" = 1) |> 
+  left_join(A_df_mta.htl) |> 
+  group_by(Species) |> 
+  # Get centroids
+  mutate(meanX = mean(V1),
+         meanY = mean(V2))
+
+# Get relative importance
+B_c_bc.pco <- 
+  B_d_bc |>
+  cmdscale(eig = T) |> 
+  pluck('eig') |> 
+  as.data.frame() |>
+  rename(eig = 1) |>
+  mutate(rel_eig = eig/sum(eig) * 100) |>
+  pull(rel_eig)
+```
+
+Plot.
+
+```{r}
+B_p_bc.pco <- 
+  B_df_bc.pco |> 
+  ggplot() +
+  geom_hline(yintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_vline(xintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_point(aes(x = V1,
+                 y = V2,
+                 color = Species),
+             size = 1,
+             alpha = 0.5)  +
+  geom_point(aes(x = meanX,
+                 y = meanY,
+                 fill = Species),
+             size = 4,
+             shape = 21,
+             color = 'white',
+             stroke = 0.75)  + 
+  geom_segment(aes(x=meanX,
+                   y=meanY,
+                   xend=V1,
+                   yend=V2,
+                   color=Species),
+               linewidth = 0.1,
+               show.legend = F) +
+  labs(x = paste0('PCo1 (', 
+                  format(round(B_c_bc.pco[1],2), nsmall = 2),
+                  '%)'),
+       y = paste0('PCo2 (', 
+                  round(B_c_bc.pco[2],2),
+                  '%)')) +
+  scale_fill_manual(values = Z_c_col.spc) +
+  scale_color_manual(values = Z_c_col.spc) +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        legend.text = element_text(face = 'italic'),
+        panel.background = element_rect(fill = '#FAFAFA'),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+```
+
+```{r}
+#| echo: false
+
+
+B_p_bc.pco
+```
+
+#### PERMANOVA
+
+```{r}
+#| eval: false
+
+
+B_s_bc.pmn.all <-
+  adonis2(B_d_bc ~ Species, 
+          data = A_df_mta.htl, 
+          permutations = 9999) |> 
+  as.data.frame() |> 
+  rownames_to_column('Parameter')
+
+# Export
+write_csv(B_s_bc.pmn.all,
+          '../Results/Tables/Supplementary table 08 - BC Interspecific PERMANOVA all.csv')
+```
+
+#### P-wise PERMANOVA
+
+Make a function that "tidy-ies" a pairwise PERMANOVA result.
+
+```{r}
+Z_f_pwi.prm.edt <- 
+  function(pmanova_res){
+    a <- 
+      pmanova_res[-1] |> 
+      bind_rows(.id = 'groups') |> 
+      drop_na() %>%
+      .$`Pr(>F)` |> 
+      p.adjust(method = 'BH') 
+    
+    b <- 
+      unique(pmanova_res[-1] |> 
+               bind_rows(.id = 'groups'))$groups |> 
+      unique()
+      
+    d <- 
+       a %>% 
+        data.frame(b,.) |> 
+        rename('groups' = 1,
+               `P-adjusted` = 2) %>% 
+        left_join(pmanova_res[-1] |> 
+                    bind_rows(.id = 'groups'), 
+                  ., 
+                  by = 'groups') |> 
+        mutate(`P-adjusted` = case_when(is.na(`Pr(>F)`) ~ NA,
+                                        .default = `P-adjusted`)) |> 
+        add_column(c('','Residual', 'Total') |> 
+                     c(c('','Residual', 'Total')) |> 
+                     c(c('','Residual', 'Total'))) |> 
+        mutate(groups = case_when(`c(...)` == 'Residual' ~ 'Residual',
+                                  `c(...)` == 'Total' ~ 'Total',
+                                  .default = groups)) |> 
+        select(!last_col()) |> 
+        mutate(groups = str_replace(groups, '_vs_', ' vs. '))
+    
+    return(d)
+  }
+```
+
+```{r}
+#| eval: false
+
+
+B_s_bc.pmn.all.pwi <- 
+    pairwise.adonis2(B_d_bc ~ Species, 
+                     data = A_df_mta.htl, 
+                     permutations = 9999)
+
+B_s_bc.pmn.all.pwi <- 
+  Z_f_pwi.prm.edt(B_s_bc.pmn.all.pwi)
+
+# Export
+write_csv(B_s_bc.pmn.all.pwi,
+          '../Results/Tables/Supplementary table 08 - BC Interspecific PERMANOVA pairwise.csv')
+```
+
+#### PERMDISP
+
+Make a function that extracts permuted PERMDISP.
+
+```{r}
+Z_f_pmd.edt <- 
+  function(pmd.per){
+    a <- 
+      pmd.per$tab |> 
+      as.data.frame() |> 
+      select(4,6) |> 
+      drop_na() |> 
+      mutate(Group = 'All') |> 
+      relocate(Group) |>
+      as_tibble()
+   b <- 
+      pmd.per$pairwise$permuted |> 
+      as.data.frame() |> 
+      rename('Q-value' = 1) |> 
+      rownames_to_column('Group') |> 
+      mutate(Group = str_replace(Group, '-', ' - ')) 
+   
+   c <- 
+      pmd.per$statistic |> 
+      as.data.frame() |> 
+      rename('F' = 1) |> 
+      rownames_to_column('Group') |> 
+      filter(Group != 'Overall (F)') |> 
+      mutate(Group = str_replace(Group, '-', ' - '),
+             Group = str_remove(Group, ' \\(t\\)'))
+   
+   d <- 
+      b |> 
+      left_join(c) |> 
+      relocate(Group, `F`)
+
+  e <- 
+      a |> 
+      bind_rows(d) |> 
+      mutate('P-value/Q-value' = if_else(!is.na(`Pr(>F)`), `Pr(>F)`, `Q-value`)) |> 
+      select(1,2,5)
+  
+  return(e)
+  }
+```
+
+```{r}
+#| warning: false
+#| eval: false
+
+
+B_s_bc.pmd.all <- 
+  permutest(betadisper(B_d_bc, A_df_mta.htl |> pull(Species)), 
+            pairwise = T,
+            permutations = 9999,
+            adjust = 'bh')
+
+
+B_s_bc.pmd.all.edt <- 
+  Z_f_pmd.edt(B_s_bc.pmd.all)
+
+
+# Export
+write_csv(B_s_bc.pmd.all.edt,
+          '../Results/Tables/Supplementary table 08 - BC Interspecific PERMDISP.csv')
+```
+
+### Heat tolerance PCoA
+
+#### *A. digitifera*
+
+Plot.
+
+```{r}
+# Filter distance data
+B_df_bc.Adig <- 
+  B_df_bc_1 |> 
+  filter(str_detect(sample_name, 'D')) |> 
+  select(one_of(B_df_bc_1 |> 
+                  colnames() |>
+                  tibble() %>%
+                  filter(str_detect(.[[1]],'ADIG|sample_name')) |>
+                  pull(1)))
+  
+
+# Convert to distance
+B_d_bc.Adig <- 
+  B_df_bc.Adig |>
+  column_to_rownames('sample_name') |> 
+  as.dist()
+
+# PCoA
+B_df_bc.pco.Adig <- 
+  B_d_bc.Adig |>
+  cmdscale(eig = T) |> 
+  pluck('points') |> 
+  as.data.frame() |> 
+  rownames_to_column() |> 
+  rename("Colony ID" = 1) |> 
+  left_join(A_df_mta.htl) |> 
+  group_by(`Heat tolerance`) |> 
+  # Get centroids
+  mutate(meanX = mean(V1),
+         meanY = mean(V2))
+
+# Get relative importance
+B_c_bc.pco.Adig <- 
+  B_d_bc.Adig |>
+  cmdscale(eig = T) |> 
+  pluck('eig') |> 
+  as.data.frame() |>
+  rename(eig = 1) |>
+  mutate(rel_eig = eig/sum(eig) * 100) |>
+  pull(rel_eig)
+
+# Plot
+B_p_bc.pco.Adig <- 
+  B_df_bc.pco.Adig |> 
+  ggplot() +
+  geom_hline(yintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_vline(xintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_point(aes(x = V1,
+                 y = V2,
+                 color = `Heat tolerance`),
+             size = 1,
+             alpha = 0.5)  +
+  geom_point(aes(x = meanX,
+                 y = meanY,
+                 fill = `Heat tolerance`),
+             size = 4,
+             shape = 21,
+             color = 'white',
+             stroke = 0.75)  + 
+  geom_segment(aes(x = meanX,
+                   y = meanY,
+                   xend = V1,
+                   yend = V2,
+                   color = `Heat tolerance`),
+               linewidth = 0.1,
+               show.legend = F) +
+  labs(x = paste0('PCo1 (', 
+                  format(round(B_c_bc.pco.Adig[1],2), nsmall = 2),
+                  '%)'),
+       y = paste0('PCo2 (', 
+                  round(B_c_bc.pco.Adig[2],2),
+                  '%)')) +
+  scale_fill_manual(values = Z_c_col.htl) +
+  scale_color_manual(values = Z_c_col.htl) +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        panel.background = element_rect(fill = '#FAFAFA'),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+```
+
+```{r}
+#| echo: false
+
+
+B_p_bc.pco.Adig
+```
+
+For stats, remove intermediates.
+
+```{r}
+#| eval: false
+
+
+# Clean
+## Cleaners
+Z_c_bc.Adig.hl.row <- 
+  A_df_mta.htl |>
+  filter(`Heat tolerance` == 'High' | `Heat tolerance` == 'Low',
+         Species == 'A. digitifera') |> 
+  pull(Colony)
+
+Z_c_bc.Adig.hl.col <- 
+  A_df_mta.htl |>
+  filter(`Heat tolerance` == 'High' | `Heat tolerance` == 'Low',
+         Species == 'A. digitifera') |> 
+  mutate(Colony = str_replace(Colony, 'D', 'ADIG'),
+         Colony = str_replace(Colony, 'M', 'AMIL'),
+         Colony = str_replace(Colony, 'T', 'ATEN')) |> 
+  arrange(Colony) |> 
+  pull(Colony)
+
+## Metadata
+B_df_mta.htl.Adig <- 
+  A_df_mta.htl |> 
+  filter(`Heat tolerance` != 'Intermediate',
+         Species == 'A. digitifera') |> 
+  arrange(Colony)
+
+B_d_bc.hl.Adig <- 
+  B_df_bc_1 |> 
+  filter(sample_name %in% Z_c_bc.Adig.hl.row) |> 
+  select(one_of(append(c('sample_name'), Z_c_bc.Adig.hl.col))) |>
+  column_to_rownames('sample_name') |> 
+  as.dist()
+
+# PERMANOVA
+B_s_bc.pmn.htl.Adig <-
+  adonis2(B_d_bc.hl.Adig ~ `Heat tolerance`, 
+          data = B_df_mta.htl.Adig, 
+          permutations = 9999) |> 
+  as.data.frame() |> 
+  rownames_to_column('Parameter')
+
+# PERMDISP
+B_s_bc.pmd.htl.Adig <- 
+  permutest(betadisper(B_d_bc.hl.Adig, B_df_mta.htl.Adig |> pull(`Heat tolerance`)), 
+            pairwise = F,
+            permutations = 9999) %>%
+  .$tab |> 
+  drop_na() |>
+  mutate(Group = 'A. digitifera') |> 
+  relocate(Group) |> 
+  select(1,5,7)
+
+# Export
+write_csv(B_s_bc.pmn.htl.Adig,
+          '../Results/Tables/Supplementary table 08 - BC Heat tolerance A. digitifera PERMANOVA.csv')
+
+write_csv(B_s_bc.pmd.htl.Adig,
+          '../Results/Tables/Supplementary table 08 - BC Heat tolerance A. digitifera PERMDISP.csv')
+```
+
+#### *A. millepora*
+
+Plot.
+
+```{r}
+# Filter distance data
+B_df_bc.Amil <- 
+  B_df_bc_1 |> 
+  filter(str_detect(sample_name, 'M')) |> 
+  select(one_of(B_df_bc_1 |> 
+                  colnames() |>
+                  tibble() %>%
+                  filter(str_detect(.[[1]],'AMIL|sample_name')) |>
+                  pull(1)))
+  
+
+# Convert to distance
+B_d_bc.Amil <- 
+  B_df_bc.Amil |>
+  column_to_rownames('sample_name') |> 
+  as.dist()
+
+# PCoA
+B_df_bc.pco.Amil <- 
+  B_d_bc.Amil |>
+  cmdscale(eig = T) |> 
+  pluck('points') |> 
+  as.data.frame() |> 
+  rownames_to_column() |> 
+  rename("Colony ID" = 1) |> 
+  left_join(A_df_mta.htl) |> 
+  group_by(`Heat tolerance`) |> 
+  # Get centroids
+  mutate(meanX = mean(V1),
+         meanY = mean(V2))
+
+# Get relative importance
+B_c_bc.pco.Amil <- 
+  B_d_bc.Amil |>
+  cmdscale(eig = T) |> 
+  pluck('eig') |> 
+  as.data.frame() |>
+  rename(eig = 1) |>
+  mutate(rel_eig = eig/sum(eig) * 100) |>
+  pull(rel_eig)
+
+# Plot
+B_p_bc.pco.Amil <- 
+  B_df_bc.pco.Amil |> 
+  ggplot() +
+  geom_hline(yintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_vline(xintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_point(aes(x = V1,
+                 y = V2,
+                 color = `Heat tolerance`),
+             size = 1,
+             alpha = 0.5)  +
+  geom_point(aes(x = meanX,
+                 y = meanY,
+                 fill = `Heat tolerance`),
+             size = 4,
+             shape = 21,
+             color = 'white',
+             stroke = 0.75)  + 
+  geom_segment(aes(x = meanX,
+                   y = meanY,
+                   xend = V1,
+                   yend = V2,
+                   color = `Heat tolerance`),
+               linewidth = 0.1,
+               show.legend = F) +
+  labs(x = paste0('PCo1 (', 
+                  format(round(B_c_bc.pco.Amil[1],2), nsmall = 2),
+                  '%)'),
+       y = paste0('PCo2 (', 
+                  round(B_c_bc.pco.Amil[2],2),
+                  '%)')) +
+  scale_fill_manual(values = Z_c_col.htl) +
+  scale_color_manual(values = Z_c_col.htl) +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        panel.background = element_rect(fill = '#FAFAFA'),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+```
+
+```{r}
+#| echo: false
+
+
+B_p_bc.pco.Amil
+```
+
+For stats, remove intermediates.
+
+```{r}
+#| eval: false
+
+
+# Clean
+## Cleaners
+Z_c_bc.Amil.hl.row <- 
+  A_df_mta.htl |>
+  filter(`Heat tolerance` == 'High' | `Heat tolerance` == 'Low',
+         Species == 'A. millepora') |> 
+  pull(Colony)
+
+Z_c_bc.Amil.hl.col <- 
+  A_df_mta.htl |>
+  filter(`Heat tolerance` == 'High' | `Heat tolerance` == 'Low',
+         Species == 'A. millepora') |> 
+  mutate(Colony = str_replace(Colony, 'D', 'ADIG'),
+         Colony = str_replace(Colony, 'M', 'AMIL'),
+         Colony = str_replace(Colony, 'T', 'ATEN')) |> 
+  arrange(Colony) |> 
+  pull(Colony)
+
+## Metadata
+B_df_mta.htl.Amil <- 
+  A_df_mta.htl |> 
+  filter(`Heat tolerance` != 'Intermediate',
+         Species == 'A. millepora') |> 
+  arrange(Colony)
+
+B_d_bc.hl.Amil <- 
+  B_df_bc_1 |> 
+  filter(sample_name %in% Z_c_bc.Amil.hl.row) |> 
+  select(one_of(append(c('sample_name'), Z_c_bc.Amil.hl.col))) |>
+  column_to_rownames('sample_name') |> 
+  as.dist()
+
+# PERMANOVA
+B_s_bc.pmn.htl.Amil <-
+  adonis2(B_d_bc.hl.Amil ~ `Heat tolerance`, 
+          data = B_df_mta.htl.Amil, 
+          permutations = 9999) |> 
+  as.data.frame() |> 
+  rownames_to_column('Parameter')
+
+# PERMDISP
+B_s_bc.pmd.htl.Amil <- 
+  permutest(betadisper(B_d_bc.hl.Amil, B_df_mta.htl.Amil |> pull(`Heat tolerance`)), 
+            pairwise = F,
+            permutations = 9999) %>%
+  .$tab |> 
+  drop_na() |>
+  mutate(Group = 'A. millepora') |> 
+  relocate(Group) |> 
+  select(1,5,7)
+
+# Export
+write_csv(B_s_bc.pmn.htl.Amil,
+          '../Results/Tables/Supplementary table 08 - BC Heat tolerance A. millepora PERMANOVA.csv')
+
+write_csv(B_s_bc.pmd.htl.Amil,
+          '../Results/Tables/Supplementary table 08 - BC Heat tolerance A. millepora PERMDISP.csv')
+```
+
+#### *A. tenuis*
+
+Plot.
+
+```{r}
+# Filter distance data
+B_df_bc.Aten <- 
+  B_df_bc_1 |> 
+  filter(str_detect(sample_name, 'T')) |> 
+  select(one_of(B_df_bc_1 |> 
+                  colnames() |>
+                  tibble() %>%
+                  filter(str_detect(.[[1]],'ATEN|sample_name')) |>
+                  pull(1)))
+  
+
+# Convert to distance
+B_d_bc.Aten <- 
+  B_df_bc.Aten |>
+  column_to_rownames('sample_name') |> 
+  as.dist()
+
+# PCoA
+B_df_bc.pco.Aten <- 
+  B_d_bc.Aten |>
+  cmdscale(eig = T) |> 
+  pluck('points') |> 
+  as.data.frame() |> 
+  rownames_to_column() |> 
+  rename("Colony ID" = 1) |> 
+  left_join(A_df_mta.htl) |> 
+  group_by(`Heat tolerance`) |> 
+  # Get centroids
+  mutate(meanX = mean(V1),
+         meanY = mean(V2))
+
+# Get relative importance
+B_c_bc.pco.Aten <- 
+  B_d_bc.Aten |>
+  cmdscale(eig = T) |> 
+  pluck('eig') |> 
+  as.data.frame() |>
+  rename(eig = 1) |>
+  mutate(rel_eig = eig/sum(eig) * 100) |>
+  pull(rel_eig)
+
+# Plot
+B_p_bc.pco.Aten <- 
+  B_df_bc.pco.Aten |> 
+  ggplot() +
+  geom_hline(yintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_vline(xintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_point(aes(x = V1,
+                 y = V2,
+                 color = `Heat tolerance`),
+             size = 1,
+             alpha = 0.5)  +
+  geom_point(aes(x = meanX,
+                 y = meanY,
+                 fill = `Heat tolerance`),
+             size = 4,
+             shape = 21,
+             color = 'white',
+             stroke = 0.75)  + 
+  geom_segment(aes(x = meanX,
+                   y = meanY,
+                   xend = V1,
+                   yend = V2,
+                   color = `Heat tolerance`),
+               linewidth = 0.1,
+               show.legend = F) +
+  labs(x = paste0('PCo1 (', 
+                  format(round(B_c_bc.pco.Aten[1],2), nsmall = 2),
+                  '%)'),
+       y = paste0('PCo2 (', 
+                  round(B_c_bc.pco.Aten[2],2),
+                  '%)')) +
+  scale_fill_manual(values = Z_c_col.htl) +
+  scale_color_manual(values = Z_c_col.htl) +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        panel.background = element_rect(fill = "white"),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+```
+
+```{r}
+#| echo: false
+
+B_p_bc.pco.Aten
+```
+
+For stats, remove intermediates.
+
+```{r}
+#| eval: false
+
+
+# Clean
+## Cleaners
+Z_c_bc.Aten.hl.row <- 
+  A_df_mta.htl |>
+  filter(`Heat tolerance` == 'High' | `Heat tolerance` == 'Low',
+         Species == 'A. tenuis') |> 
+  pull(Colony)
+
+Z_c_bc.Aten.hl.col <- 
+  A_df_mta.htl |>
+  filter(`Heat tolerance` == 'High' | `Heat tolerance` == 'Low',
+         Species == 'A. tenuis') |> 
+  mutate(Colony = str_replace(Colony, 'D', 'ADIG'),
+         Colony = str_replace(Colony, 'M', 'AMIL'),
+         Colony = str_replace(Colony, 'T', 'ATEN')) |> 
+  arrange(Colony) |> 
+  pull(Colony)
+
+## Metadata
+B_df_mta.htl.Aten <- 
+  A_df_mta.htl |> 
+  filter(`Heat tolerance` != 'Intermediate',
+         Species == 'A. tenuis') |> 
+  arrange(Colony)
+
+B_d_bc.hl.Aten <- 
+  B_df_bc_1 |> 
+  filter(sample_name %in% Z_c_bc.Aten.hl.row) |> 
+  select(one_of(append(c('sample_name'), Z_c_bc.Aten.hl.col))) |>
+  column_to_rownames('sample_name') |> 
+  as.dist()
+
+# PERMANOVA
+B_s_bc.pmn.htl.Aten <-
+  adonis2(B_d_bc.hl.Aten ~ `Heat tolerance`, 
+          data = B_df_mta.htl.Aten, 
+          permutations = 9999) |> 
+  as.data.frame() |> 
+  rownames_to_column('Parameter')
+
+# PERMDISP
+B_s_bc.pmd.htl.Aten <- 
+  permutest(betadisper(B_d_bc.hl.Aten, B_df_mta.htl.Aten |> pull(`Heat tolerance`)), 
+            pairwise = F,
+            permutations = 9999) %>%
+  .$tab |> 
+  drop_na() |>
+  mutate(Group = 'A. tenuis') |> 
+  relocate(Group) |> 
+  select(1,5,7)
+
+# Export
+write_csv(B_s_bc.pmn.htl.Aten,
+          '../Results/Tables/Supplementary table 08 - BC Heat tolerance A. tenuis PERMANOVA.csv')
+
+write_csv(B_s_bc.pmd.htl.Aten,
+          '../Results/Tables/Supplementary table 08 - BC Heat tolerance A. tenuis PERMDISP.csv')
+```
+
+### Merge
+
+```{r}
+#| warning: false
+
+
+B_p_bc.pco.htl <- 
+  plot_grid(B_p_bc.pco.Adig,
+            B_p_bc.pco.Amil,
+            B_p_bc.pco.Aten,
+            nrow = 3,
+            axis = 'tblr',
+            align = 'v')
+
+B_p_bc.pco.edt <- 
+  plot_grid(NA,
+            B_p_bc.pco,
+            nrow = 2,
+            rel_heights = c(1,2.25))
+
+B_p_bc.pco.all <- 
+  plot_grid(B_p_bc.pco.htl,
+            B_p_bc.pco.edt,
+            rel_widths = c(1,1.5))
+```
+
+Export.
+
+```{r}
+#| eval: false
+
+
+ggsave(B_p_bc.pco.all,
+       filename = '../Results/Figures/Supplementary figure 07.png',
+       dpi = 900,
+       width = 6500, 
+       height = 4500, 
+       units = "px")
+```
+
+## Weighted Unifrac
+
+```{r}
+#| warning: false
+
+
+C_df_wun <- 
+  read_tsv('../data/Fig02_ITS2Unifrac.dist',
+           col_names = F) |> 
+  select(!2)
+```
+
+### Clean
+
+Get ID names.
+
+```{r}
+C_c_wun.nam <- 
+  C_df_wun |>
+  pull(1)
+
+C_c_wun.nam_1 <- 
+  c('sample_name') |> 
+  append(C_c_wun.nam)
+```
+
+Rename df.
+
+```{r}
+C_df_wun_1 <- 
+  C_df_wun |> 
+  rename_with(~ C_c_wun.nam_1, everything())
+```
+
+Remove unidentified colonies and change ID names.
+
+```{r}
+C_df_wun_1 <- 
+  C_df_wun_1 |> 
+  filter(!sample_name %in% Z_c_mor.unr) |> 
+  select(!one_of(Z_c_mor.unr)) |> 
+  filter(!sample_name %in% Z_c_mor.unr) |> 
+  mutate(sample_name = str_replace(sample_name, 'ADIG', 'D'),
+         sample_name = str_replace(sample_name, 'AMIL', 'M'),
+         sample_name = str_replace(sample_name, 'ATEN', 'T'))
+```
+
+Change to dist object.
+
+```{r}
+C_d_wun <- 
+  C_df_wun_1 |>
+  column_to_rownames('sample_name') |> 
+  as.dist()
+```
+
+### Species PCoA
+
+```{r}
+#| warning: false
+
+
+# Do PcoA
+C_df_wun.pco <- 
+  C_d_wun |>
+  cmdscale(eig = T) |> 
+  pluck('points') |> 
+  as.data.frame() |> 
+  rownames_to_column() |> 
+  rename("Colony ID" = 1) |> 
+  left_join(A_df_mta.htl) |> 
+  group_by(Species) |> 
+  # Get centroids
+  mutate(meanX = mean(V1),
+         meanY = mean(V2))
+
+# Get relative importance
+C_c_wun.pco <- 
+  C_d_wun |>
+  cmdscale(eig = T) |> 
+  pluck('eig') |> 
+  as.data.frame() |>
+  rename(eig = 1) |>
+  mutate(rel_eig = eig/sum(eig) * 100) |>
+  pull(rel_eig)
+```
+
+Plot.
+
+```{r}
+C_p_wun.pco <- 
+  C_df_wun.pco |> 
+  ggplot() +
+  geom_hline(yintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_vline(xintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_point(aes(x = V1,
+                 y = V2,
+                 shape = Species,
+                 color = combined),
+             size = 3) +
+  labs(x = paste0('PCo1 (', 
+                  format(round(C_c_wun.pco[1],2), nsmall = 2),
+                  '%)'),
+       y = paste0('PCo2 (', 
+                  round(C_c_wun.pco[2],2),
+                  '%)')) + 
+  scale_color_distiller(palette = "RdYlBu", 
+    direction = -1) +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+
+# Export
+ggsave(C_p_wun.pco,
+       filename = '../Results/Figures/WUni among species.png',
+       dpi = 900,
+       width = 4000, 
+       height = 3000, 
+       units = "px")
+```
+
+```{r}
+#| echo: false
+
+C_p_wun.pco
+```
+
+### ITS2 profiles barplots
+
+```{r}
+A_df_prf <- 
+  read_tsv('../data/Fig02_ITS2TypeProfiles.txt') |> 
+  row_to_names(6) |> 
+  rename(sample_name = 2,
+         uid = 1) |> 
+  drop_na() |> 
+  filter(!sample_name %in% Z_c_mor.unr) |> 
+  mutate(sample_name = str_replace(sample_name, 'ADIG', 'D'),
+         sample_name = str_replace(sample_name, 'AMIL', 'M'),
+         sample_name = str_replace(sample_name, 'ATEN', 'T')) |> 
+  mutate(Species = case_when(str_detect(sample_name, 'D') ~ 'A. digitifera',
+                             str_detect(sample_name, 'M') ~ 'A. millepora',
+                             .default = 'A. tenuis'))
+
+A_df_prf_1 <- 
+  A_df_prf |> 
+  pivot_longer(!c(1,2,7),
+               names_to = 'ITS2TypeProfile',
+               values_to = 'Counts') |> 
+  mutate(Counts = if_else(Counts > 0, 1, 0))
+
+B_df_prf <- 
+  A_df_prf_1 |> 
+  group_by(Species,
+           ITS2TypeProfile) |> 
+  summarise(Total = sum(Counts))
+
+# Plot
+B_p_prf <- 
+  B_df_prf |> 
+  mutate(Species = str_sub(Species, 1, 6)) |> 
+  mutate(Species = str_remove(Species, ". ")) |> 
+  ggplot(aes(x = Species,
+             y = Total,
+             fill = ITS2TypeProfile)) +
+  geom_bar(stat = 'identity',
+           position = "fill") +
+  scale_fill_manual(values = Z_c_col.prf) +
+  labs(y = 'Proportion',
+       fill = 'ITS2 type profile') +
+  scale_y_continuous(expand = c(0,0)) +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        strip.background = element_blank(),
+        axis.title.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_markdown())
+
+ggsave(B_p_prf,
+       filename = '../Results/Figures/ITS2 type profiles among species.png',
+       dpi = 900,
+       width = 3500, 
+       height = 1650, 
+       units = "px")
+```
+
+#### PERMANOVA
+
+```{r}
+#| eval: false
+
+
+C_s_wun.pmn.all <-
+  adonis2(C_d_wun ~ Species, 
+          data = A_df_mta.htl, 
+          permutations = 9999) |> 
+  as.data.frame() |> 
+  rownames_to_column('Parameter')
+
+write_csv(C_s_wun.pmn.all,
+          '../Results/Tables/Table 02 - Weighted Unifrac Interspecific PERMANOVA all.csv')
+```
+
+#### **P-wise PERMANOVA**
+
+```{r}
+#| eval: false
+
+
+C_s_wun.pmn.all.pwi <- 
+    pairwise.adonis2(C_d_wun ~ Species, 
+                     data = A_df_mta.htl, 
+                     permutations = 9999)
+
+C_s_wun.pmn.all.pwi <- 
+  Z_f_pwi.prm.edt(C_s_wun.pmn.all.pwi)
+
+# Export
+write_csv(C_s_wun.pmn.all.pwi,
+          '../Results/Tables/Table 02 - Weighted Unifrac Interspecific PERMANOVA pairwise.csv')
+```
+
+#### PERMDISP
+
+```{r}
+#| warning: false
+#| eval: false
+
+
+C_s_wun.pmd.all <- 
+  permutest(betadisper(C_d_wun, A_df_mta.htl |> pull(Species)), 
+            pairwise = T,
+            permutations = 9999,
+            adjust = 'bh')
+
+
+C_s_wun.pmd.all.edt <- 
+  Z_f_pmd.edt(C_s_wun.pmd.all)
+
+
+# Export
+write_csv(C_s_wun.pmd.all.edt,
+          '../Results/Tables/Table 02 - Weighted Unifrac Interspecific PERMDISP.csv')
+```
+
+### **Heat tolerance PCoA**
+
+#### *A. digitifera*
+
+Plot.
+
+```{r}
+# Filter distance data
+C_df_wun.Adig <- 
+  C_df_wun_1 |> 
+  filter(str_detect(sample_name, 'D')) |> 
+  select(one_of(C_df_wun_1 |> 
+                  colnames() |>
+                  tibble() %>%
+                  filter(str_detect(.[[1]],'ADIG|sample_name')) |>
+                  pull(1)))
+  
+
+# Convert to distance
+C_d_wun.Adig <- 
+  C_df_wun.Adig |>
+  column_to_rownames('sample_name') |> 
+  as.dist()
+
+# PCoA
+C_df_wun.pco.Adig <- 
+  C_d_wun.Adig |>
+  cmdscale(eig = T) |> 
+  pluck('points') |> 
+  as.data.frame() |> 
+  rownames_to_column() |> 
+  rename("Colony ID" = 1) |> 
+  left_join(A_df_mta.htl) |> 
+  group_by(`Heat tolerance`) |> 
+  # Get centroids
+  mutate(meanX = mean(V1),
+         meanY = mean(V2))
+
+# Get relative importance
+C_c_wun.pco.Adig <- 
+  C_d_wun.Adig |>
+  cmdscale(eig = T) |> 
+  pluck('eig') |> 
+  as.data.frame() |>
+  rename(eig = 1) |>
+  mutate(rel_eig = eig/sum(eig) * 100) |>
+  pull(rel_eig)
+
+# Plot
+C_p_wun.pco.Adig <- 
+  C_df_wun.pco.Adig |> 
+  filter(`Heat tolerance` != "Intermediate") |> 
+  mutate(`Heat tolerance` = if_else(`Heat tolerance` == "High", "Thermotolerant", "Thermosensitive")) |> 
+  ggplot() +
+  geom_hline(yintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_vline(xintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_point(aes(x = V1,
+                 y = V2,
+                 color = fct_relevel(`Heat tolerance`, c("Thermotolerant"))),
+             size = 1,
+             alpha = 0.5)  +
+  geom_point(aes(x = meanX,
+                 y = meanY,
+                 fill = fct_relevel(`Heat tolerance`, c("Thermotolerant"))),
+             size = 4,
+             shape = 21,
+             color = 'white',
+             stroke = 0.75)  + 
+  geom_segment(aes(x = meanX,
+                   y = meanY,
+                   xend = V1,
+                   yend = V2,
+                   color = fct_relevel(`Heat tolerance`, c("Thermotolerant"))),
+               linewidth = 0.1,
+               show.legend = F) +
+  labs(x = paste0('PCo1 (', 
+                  format(round(C_c_wun.pco.Adig[1],2), nsmall = 2),
+                  '%)'),
+       y = paste0('PCo2 (', 
+                  round(C_c_wun.pco.Adig[2],2),
+                  '%)'),
+       fill = "Group",
+       color = "Group") +
+  scale_fill_manual(values = Z_c_col.htl) +
+  scale_color_manual(values = Z_c_col.htl) +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        panel.background = element_rect(fill = 'transparent'),
+        plot.background = element_rect(fill = "transparent",
+                                       color = "transparent"),
+        legend.background = element_rect(fill = "transparent"),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+
+# Export
+ggsave(C_p_wun.pco.Adig,
+       filename = '../Results/Figures/WUni Adig T and S.png',
+       dpi = 900,
+       width = 3250, 
+       height = 2000, 
+       units = "px")
+
+
+# ITS2 profiles
+A_df_prf <- 
+  read_tsv('../data/Fig02_ITS2TypeProfiles.txt') |> 
+  row_to_names(6) |> 
+  rename(sample_name = 2,
+         uid = 1) |> 
+  drop_na() |> 
+  filter(!sample_name %in% Z_c_mor.unr) |> 
+  mutate(sample_name = str_replace(sample_name, 'ADIG', 'D'),
+         sample_name = str_replace(sample_name, 'AMIL', 'M'),
+         sample_name = str_replace(sample_name, 'ATEN', 'T')) |> 
+  mutate(Species = case_when(str_detect(sample_name, 'D') ~ 'A. digitifera',
+                             str_detect(sample_name, 'M') ~ 'A. millepora',
+                             .default = 'A. tenuis'))
+
+A_df_prf_1 <- 
+  A_df_prf |> 
+  pivot_longer(!c(1,2,7),
+               names_to = 'ITS2TypeProfile',
+               values_to = 'Counts') |> 
+  mutate(Counts = if_else(Counts > 0, 1, 0))
+
+B_df_prf <- 
+  A_df_prf_1 |> 
+  rename("Colony ID" = sample_name) |> 
+  left_join(A_df_mta.htl) |> 
+  group_by(Species,
+           `Heat tolerance`,
+           ITS2TypeProfile)  |> 
+  summarise(Total = sum(Counts)) |> 
+  ungroup() |> 
+  mutate(`Heat tolerance` = case_when(`Heat tolerance` == "High" ~ "Thermotolerant",
+                                     `Heat tolerance` == "Low" ~ "Thermosensitive",
+                                     .default = "Intermediate")) |> 
+  filter(`Heat tolerance` != "Intermediate")
+
+# Plot
+B_p_prf <- 
+  B_df_prf |> 
+  filter(Species == "A. digitifera") |> 
+  mutate(Species = str_sub(Species, 1, 6)) |> 
+  mutate(Species = str_remove(Species, ". ")) |> 
+  ggplot(aes(x = `Heat tolerance`,
+             y = Total,
+             fill = ITS2TypeProfile)) +
+  geom_bar(stat = 'identity',
+           position = "fill",
+           width = 0.75) +
+  labs(y = 'Proportion',
+       fill = 'ITS2 type profile') +
+  coord_flip() +
+  scale_fill_manual(values = Z_c_col.prf) +
+  scale_y_continuous(expand = c(0,0)) +
+  theme_classic() +
+  theme(strip.background = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.text.x = element_markdown(),
+        panel.grid = element_blank(),
+        panel.background = element_rect(fill = 'transparent'),
+        plot.background = element_rect(fill = "transparent",
+                                       color = "transparent"),
+        legend.background = element_rect(fill = "transparent"))
+
+ggsave(B_p_prf,
+       filename = '../Results/Figures/ITS2 type profiles among T and S of Adig.png',
+       dpi = 900,
+       width = 4385, 
+       height = 900, 
+       units = "px")
+
+# Amil
+B_p_prf <- 
+  B_df_prf |> 
+  filter(Species == "A. millepora") |> 
+  mutate(Species = str_sub(Species, 1, 6)) |> 
+  mutate(Species = str_remove(Species, ". ")) |> 
+  ggplot(aes(x = `Heat tolerance`,
+             y = Total,
+             fill = ITS2TypeProfile)) +
+  geom_bar(stat = 'identity',
+           position = "fill",
+           width = 0.75) +
+  labs(y = 'Proportion',
+       fill = 'ITS2 type profile') +
+  coord_flip() +
+  scale_fill_manual(values = Z_c_col.prf) +
+  scale_y_continuous(expand = c(0,0)) +
+  theme_classic() +
+  theme(strip.background = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.text.x = element_markdown(),
+        panel.grid = element_blank(),
+        panel.background = element_rect(fill = 'transparent'),
+        plot.background = element_rect(fill = "transparent",
+                                       color = "transparent"),
+        legend.background = element_rect(fill = "transparent"))
+
+ggsave(B_p_prf,
+       filename = '../Results/Figures/ITS2 type profiles among T and S of Amil.png',
+       dpi = 900,
+       width = 4385, 
+       height = 900, 
+       units = "px")
+
+# Aten
+B_p_prf <- 
+  B_df_prf |> 
+  filter(Species == "A. tenuis") |> 
+  mutate(Species = str_sub(Species, 1, 6)) |> 
+  mutate(Species = str_remove(Species, ". ")) |> 
+  ggplot(aes(x = `Heat tolerance`,
+             y = Total,
+             fill = ITS2TypeProfile)) +
+  geom_bar(stat = 'identity',
+           position = "fill",
+           width = 0.75) +
+  labs(y = 'Proportion',
+       fill = 'ITS2 type profile') +
+  coord_flip() +
+  scale_fill_manual(values = Z_c_col.prf) +
+  scale_y_continuous(expand = c(0,0)) +
+  theme_classic() +
+  theme(strip.background = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.text.x = element_markdown(),
+        panel.grid = element_blank(),
+        panel.background = element_rect(fill = 'transparent'),
+        plot.background = element_rect(fill = "transparent",
+                                       color = "transparent"),
+        legend.background = element_rect(fill = "transparent"))
+
+ggsave(B_p_prf,
+       filename = '../Results/Figures/ITS2 type profiles among T and S of Aten.png',
+       dpi = 900,
+       width = 4385, 
+       height = 900, 
+       units = "px")
+```
+
+```{r}
+#| echo: false
+
+C_p_wun.pco.Adig
+```
+
+For stats, remove intermediates.
+
+```{r}
+#| eval: false
+
+
+# Clean
+## Cleaners
+Z_c_wun.Adig.hl.row <- 
+  A_df_mta.htl |>
+  filter(`Heat tolerance` == 'High' | `Heat tolerance` == 'Low',
+         Species == 'A. digitifera') |> 
+  pull(Colony)
+
+Z_c_wun.Adig.hl.col <- 
+  A_df_mta.htl |>
+  filter(`Heat tolerance` == 'High' | `Heat tolerance` == 'Low',
+         Species == 'A. digitifera') |> 
+  mutate(Colony = str_replace(Colony, 'D', 'ADIG'),
+         Colony = str_replace(Colony, 'M', 'AMIL'),
+         Colony = str_replace(Colony, 'T', 'ATEN')) |> 
+  arrange(Colony) |> 
+  pull(Colony)
+
+## Metadata
+C_df_mta.htl.Adig <- 
+  A_df_mta.htl |> 
+  filter(`Heat tolerance` != 'Intermediate',
+         Species == 'A. digitifera') |> 
+  arrange(Colony)
+
+C_d_wun.hl.Adig <- 
+  C_df_wun_1 |> 
+  filter(sample_name %in% Z_c_wun.Adig.hl.row) |> 
+  select(one_of(append(c('sample_name'), Z_c_wun.Adig.hl.col))) |>
+  column_to_rownames('sample_name') |> 
+  as.dist()
+
+# PERMANOVA
+C_s_wun.pmn.htl.Adig <-
+  adonis2(C_d_wun.hl.Adig ~ `Heat tolerance`, 
+          data = C_df_mta.htl.Adig, 
+          permutations = 9999) |> 
+  as.data.frame() |> 
+  rownames_to_column('Parameter')
+
+# PERMDISP
+C_s_wun.pmd.htl.Adig <- 
+  permutest(betadisper(C_d_wun.hl.Amil, C_df_mta.htl.Amil |> pull(`Heat tolerance`)), 
+            pairwise = F,
+            permutations = 9999) %>%
+  .$tab |> 
+  drop_na() |>
+  mutate(Group = 'A. digitifera') |> 
+  relocate(Group) |> 
+  select(1,5,7)
+
+# Export
+write_csv(C_s_wun.pmn.htl.Adig,
+          '../Results/Tables/Table 02 - Weighted Unifrac Heat tolerance A. digitifera PERMANOVA.csv')
+
+write_csv(C_s_wun.pmd.htl.Adig,
+          '../Results/Tables/Table 02 - Weighted Unifrac Heat tolerance A. digitifera PERMDISP.csv')
+```
+
+#### *A. millepora*
+
+Plot.
+
+```{r}
+#| warning: false
+
+
+# Filter distance data
+C_df_wun.Amil <- 
+  C_df_wun_1 |> 
+  filter(str_detect(sample_name, 'M')) |> 
+  select(one_of(C_df_wun_1 |> 
+                  colnames() |>
+                  tibble() %>%
+                  filter(str_detect(.[[1]],'AMIL|sample_name')) |>
+                  pull(1)))
+  
+
+# Convert to distance
+C_d_wun.Amil <- 
+  C_df_wun.Amil |>
+  column_to_rownames('sample_name') |> 
+  as.dist()
+
+# PCoA
+C_df_wun.pco.Amil <- 
+  C_d_wun.Amil |>
+  cmdscale(eig = T) |> 
+  pluck('points') |> 
+  as.data.frame() |> 
+  rownames_to_column() |> 
+  rename("Colony ID" = 1) |> 
+  left_join(A_df_mta.htl) |> 
+  group_by(`Heat tolerance`) |> 
+  # Get centroids
+  mutate(meanX = mean(V1),
+         meanY = mean(V2))
+
+# Get relative importance
+C_c_wun.pco.Amil <- 
+  C_d_wun.Amil |>
+  cmdscale(eig = T) |> 
+  pluck('eig') |> 
+  as.data.frame() |>
+  rename(eig = 1) |>
+  mutate(rel_eig = eig/sum(eig) * 100) |>
+  pull(rel_eig)
+
+# Plot
+C_p_wun.pco.Amil <- 
+  C_df_wun.pco.Amil |> 
+  filter(`Heat tolerance` != "Intermediate") |> 
+  mutate(`Heat tolerance` = if_else(`Heat tolerance` == "High", "Thermotolerant", "Thermosensitive")) |> 
+  ggplot() +
+  geom_hline(yintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_vline(xintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_point(aes(x = V1,
+                 y = V2,
+                 color = fct_relevel(`Heat tolerance`, c("Thermotolerant"))),
+             size = 1,
+             alpha = 0.5)  +
+  geom_point(aes(x = meanX,
+                 y = meanY,
+                 fill = fct_relevel(`Heat tolerance`, c("Thermotolerant"))),
+             size = 4,
+             shape = 21,
+             color = 'white',
+             stroke = 0.75)  + 
+  geom_segment(aes(x = meanX,
+                   y = meanY,
+                   xend = V1,
+                   yend = V2,
+                   color = fct_relevel(`Heat tolerance`, c("Thermotolerant"))),
+               linewidth = 0.1,
+               show.legend = F) +
+  labs(x = paste0('PCo1 (', 
+                  format(round(C_c_wun.pco.Amil[1],2), nsmall = 2),
+                  '%)'),
+       y = paste0('PCo2 (', 
+                  round(C_c_wun.pco.Amil[2],2),
+                  '%)'),
+       fill = "Group",
+       color = "Group") +
+  scale_fill_manual(values = Z_c_col.htl) +
+  scale_color_manual(values = Z_c_col.htl) +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        panel.background = element_rect(fill = 'transparent'),
+        plot.background = element_rect(fill = "transparent",
+                                       color = "transparent"),
+        legend.background = element_rect(fill = "transparent"),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+
+# Export
+ggsave(C_p_wun.pco.Amil,
+       filename = '../Results/Figures/WUni Amil T and S.png',
+       dpi = 900,
+       width = 3250, 
+       height = 2000, 
+       units = "px")
+```
+
+```{r}
+#| echo: false
+
+
+C_p_wun.pco.Amil
+```
+
+For stats, remove intermediates.
+
+```{r}
+#| warning: false
+#| eval: false
+
+# Clean
+## Cleaners
+Z_c_wun.Amil.hl.row <- 
+  A_df_mta.htl |>
+  filter(`Heat tolerance` == 'High' | `Heat tolerance` == 'Low',
+         Species == 'A. millepora') |> 
+  pull(Colony)
+
+Z_c_wun.Amil.hl.col <- 
+  A_df_mta.htl |>
+  filter(`Heat tolerance` == 'High' | `Heat tolerance` == 'Low',
+         Species == 'A. millepora') |> 
+  mutate(Colony = str_replace(Colony, 'D', 'ADIG'),
+         Colony = str_replace(Colony, 'M', 'AMIL'),
+         Colony = str_replace(Colony, 'T', 'ATEN')) |> 
+  arrange(Colony) |> 
+  pull(Colony)
+
+## Metadata
+C_df_mta.htl.Amil <- 
+  A_df_mta.htl |> 
+  filter(`Heat tolerance` != 'Intermediate',
+         Species == 'A. millepora') |> 
+  arrange(Colony)
+
+C_d_wun.hl.Amil <- 
+  C_df_wun_1 |> 
+  filter(sample_name %in% Z_c_wun.Amil.hl.row) |> 
+  select(one_of(append(c('sample_name'), Z_c_wun.Amil.hl.col))) |>
+  column_to_rownames('sample_name') |> 
+  as.dist()
+
+# PERMANOVA
+C_s_wun.pmn.htl.Amil <-
+  adonis2(C_d_wun.hl.Amil ~ `Heat tolerance`, 
+          data = C_df_mta.htl.Amil, 
+          permutations = 9999) |> 
+  as.data.frame() |> 
+  rownames_to_column('Parameter')
+
+# PERMDISP
+C_s_wun.pmd.htl.Amil <- 
+  permutest(betadisper(C_d_wun.hl.Amil, C_df_mta.htl.Amil |> pull(`Heat tolerance`)), 
+            pairwise = F,
+            permutations = 9999) %>%
+  .$tab |> 
+  drop_na() |>
+  mutate(Group = 'A. millepora') |> 
+  relocate(Group) |> 
+  select(1,5,7)
+
+
+# Export
+write_csv(C_s_wun.pmn.htl.Amil,
+          '../Results/Tables/Table 02 - Weighted Unifrac Heat tolerance A. millepora PERMANOVA.csv')
+
+write_csv(C_s_wun.pmd.htl.Amil,
+          '../Results/Tables/Table 02 - Weighted Unifrac Heat tolerance A. millepora PERMDISP.csv')
+```
+
+#### *A. tenuis*
+
+Plot.
+
+```{r}
+#| warning: false
+
+
+# Filter distance data
+C_df_wun.Aten <- 
+  C_df_wun_1 |> 
+  filter(str_detect(sample_name, 'T')) |> 
+  select(one_of(C_df_wun_1 |> 
+                  colnames() |>
+                  tibble() %>%
+                  filter(str_detect(.[[1]],'ATEN|sample_name')) |>
+                  pull(1)))
+  
+
+# Convert to distance
+C_d_wun.Aten <- 
+  C_df_wun.Aten |>
+  column_to_rownames('sample_name') |> 
+  as.dist()
+
+# PCoA
+C_df_wun.pco.Aten <- 
+  C_d_wun.Aten |>
+  cmdscale(eig = T) |> 
+  pluck('points') |> 
+  as.data.frame() |> 
+  rownames_to_column() |> 
+  rename("Colony ID" = 1) |> 
+  left_join(A_df_mta.htl) |> 
+  group_by(`Heat tolerance`) |> 
+  # Get centroids
+  mutate(meanX = mean(V1),
+         meanY = mean(V2))
+
+# Get relative importance
+C_c_wun.pco.Aten <- 
+  C_d_wun.Aten |>
+  cmdscale(eig = T) |> 
+  pluck('eig') |> 
+  as.data.frame() |>
+  rename(eig = 1) |>
+  mutate(rel_eig = eig/sum(eig) * 100) |>
+  pull(rel_eig)
+
+# Plot
+C_p_wun.pco.Aten <- 
+  C_df_wun.pco.Aten |> 
+  filter(`Heat tolerance` != "Intermediate") |> 
+  mutate(`Heat tolerance` = if_else(`Heat tolerance` == "High", "Thermotolerant", "Thermosensitive")) |> 
+  ggplot() +
+  geom_hline(yintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_vline(xintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_point(aes(x = V1,
+                 y = V2,
+                 color = fct_relevel(`Heat tolerance`, c("Thermotolerant"))),
+             size = 1,
+             alpha = 0.5)  +
+  geom_point(aes(x = meanX,
+                 y = meanY,
+                 fill = fct_relevel(`Heat tolerance`, c("Thermotolerant"))),
+             size = 4,
+             shape = 21,
+             color = 'white',
+             stroke = 0.75)  + 
+  geom_segment(aes(x = meanX,
+                   y = meanY,
+                   xend = V1,
+                   yend = V2,
+                   color = fct_relevel(`Heat tolerance`, c("Thermotolerant"))),
+               linewidth = 0.1,
+               show.legend = F) +
+  labs(x = paste0('PCo1 (', 
+                  format(round(C_c_wun.pco.Aten[1],2), nsmall = 2),
+                  '%)'),
+       y = paste0('PCo2 (', 
+                  round(C_c_wun.pco.Aten[2],2),
+                  '%)'),
+       fill = "Group",
+       color = "Group") +
+  scale_fill_manual(values = Z_c_col.htl) +
+  scale_color_manual(values = Z_c_col.htl) +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        panel.background = element_rect(fill = 'transparent'),
+        plot.background = element_rect(fill = "transparent",
+                                       color = "transparent"),
+        legend.background = element_rect(fill = "transparent"),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+
+# Export
+ggsave(C_p_wun.pco.Aten,
+       filename = '../Results/Figures/WUni Aten T and S.png',
+       dpi = 900,
+       width = 3250, 
+       height = 2000, 
+       units = "px")
+```
+
+```{r}
+#| echo: false
+
+C_p_wun.pco.Aten
+```
+
+For stats, remove intermediates.
+
+```{r}
+#| warning: false
+#| eval: false
+
+# Clean
+## Cleaners
+Z_c_wun.Aten.hl.row <- 
+  A_df_mta.htl |>
+  filter(`Heat tolerance` == 'High' | `Heat tolerance` == 'Low',
+         Species == 'A. tenuis') |> 
+  pull(Colony)
+
+Z_c_wun.Aten.hl.col <- 
+  A_df_mta.htl |>
+  filter(`Heat tolerance` == 'High' | `Heat tolerance` == 'Low',
+         Species == 'A. tenuis') |> 
+  mutate(Colony = str_replace(Colony, 'D', 'ADIG'),
+         Colony = str_replace(Colony, 'M', 'AMIL'),
+         Colony = str_replace(Colony, 'T', 'ATEN')) |> 
+  arrange(Colony) |> 
+  pull(Colony)
+
+## Metadata
+C_df_mta.htl.Aten <- 
+  A_df_mta.htl |> 
+  filter(`Heat tolerance` != 'Intermediate',
+         Species == 'A. tenuis') |> 
+  arrange(Colony)
+
+C_d_wun.hl.Aten <- 
+  C_df_wun_1 |> 
+  filter(sample_name %in% Z_c_wun.Aten.hl.row) |> 
+  select(one_of(append(c('sample_name'), Z_c_wun.Aten.hl.col))) |>
+  column_to_rownames('sample_name') |> 
+  as.dist()
+
+# PERMANOVA
+C_s_wun.pmn.htl.Aten <-
+  adonis2(C_d_wun.hl.Aten ~ `Heat tolerance`, 
+          data = C_df_mta.htl.Aten, 
+          permutations = 9999) |> 
+  as.data.frame() |> 
+  rownames_to_column('Parameter')
+
+# PERMDISP
+C_s_wun.pmd.htl.Aten <- 
+  permutest(betadisper(C_d_wun.hl.Aten, C_df_mta.htl.Aten |> pull(`Heat tolerance`)), 
+            pairwise = F,
+            permutations = 9999) %>%
+  .$tab |> 
+  drop_na() |>
+  mutate(Group = 'A. tenuis') |> 
+  relocate(Group) |> 
+  select(1,5,7)
+
+# Export
+write_csv(C_s_wun.pmn.htl.Aten,
+          '../Results/Tables/Table 02 - Weighted Unifrac Heat tolerance A. tenuis PERMANOVA.csv')
+
+write_csv(C_s_wun.pmd.htl.Aten,
+          '../Results/Tables/Table 02 - Weighted Unifrac Heat tolerance A. tenuis PERMDISP.csv')
+```
+
+### Merge
+
+```{r}
+#| warning: false
+
+
+C_p_wun.pco.htl <- 
+  plot_grid(C_p_wun.pco.Adig,
+            C_p_wun.pco.Amil,
+            C_p_wun.pco.Aten,
+            nrow = 3,
+            axis = 'tblr',
+            align = 'v')
+
+C_p_wun.pco.edt <- 
+  plot_grid(NA,
+            C_p_wun.pco,
+            nrow = 2,
+            rel_heights = c(1,2.25))
+
+C_p_wun.pco.all <- 
+  plot_grid(C_p_wun.pco.htl,
+            C_p_wun.pco.edt,
+            rel_widths = c(1,1.5))
+```
+
+Export.
+
+```{r}
+#| eval: false
+ggsave(C_p_wun.pco.all,
+       filename = '../Results/Figures/Supplementary figure 06.png',
+       dpi = 900,
+       width = 7000, 
+       height = 4500, 
+       units = "px")
+```
+
+# Miscellany
+
+Tried pooling all samples together, and clustering them based on heat tolerance to view relationship between heat tolerance and Symbiodiniaceae composition.
+
+```{r}
+#| warning: false
+
+
+# Do PcoA
+D_df_wun.pco <- 
+  C_d_wun |>
+  cmdscale(eig = T) |> 
+  pluck('points') |> 
+  as.data.frame() |> 
+  rownames_to_column() |> 
+  rename(Colony = 1) |> 
+  left_join(A_df_mta.htl) |> 
+  group_by(`Heat tolerance`) |> 
+  # Get centroids
+  mutate(meanX = mean(V1),
+         meanY = mean(V2))
+
+# Get relative importance
+D_c_wun.pco <- 
+  C_d_wun |>
+  cmdscale(eig = T) |> 
+  pluck('eig') |> 
+  as.data.frame() |>
+  rename(eig = 1) |>
+  mutate(rel_eig = eig/sum(eig) * 100) |>
+  pull(rel_eig)
+```
+
+Plot all samples grouped based in heat tolerance classification.
+
+```{r}
+D_p_wun.pco <- 
+  D_df_wun.pco |> 
+  ggplot() +
+  geom_hline(yintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_vline(xintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_point(aes(x = V1,
+                 y = V2,
+                 color = `Heat tolerance`),
+             size = 1,
+             alpha = 0.5)  +
+  geom_point(aes(x = meanX,
+                 y = meanY,
+                 fill = `Heat tolerance`),
+             size = 4,
+             shape = 21,
+             color = 'white',
+             stroke = 1)  + 
+  geom_segment(aes(x=meanX,
+                   y=meanY,
+                   xend=V1,
+                   yend=V2,
+                   color=`Heat tolerance`),
+               linewidth = 0.1,
+               show.legend = F) +
+  labs(x = paste0('PCo1 (', 
+                  format(round(D_c_wun.pco[1],2), nsmall = 2),
+                  '%)'),
+       y = paste0('PCo2 (', 
+                  format(round(D_c_wun.pco[2],2), nsmall = 2),
+                  '%)')) +
+  scale_fill_manual(values = Z_c_col.htl) +
+  scale_color_manual(values = Z_c_col.htl) +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        panel.background = element_rect(fill = '#FAFAFA'),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+```
+
+Plot all samples and incorporate continuous variable.
+
+```{r}
+D_p_wun.pco.grd <- 
+  D_df_wun.pco |> 
+  ggplot() +
+  geom_hline(yintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_vline(xintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_point(aes(x = V1,
+                 y = V2,
+                 color = Ranking,
+                 shape = Species),
+             size = 3,
+             alpha = 0.5) +
+  scale_color_gradientn(colors = c("#B2182B", "gray", "gray", "gray","#2166AC")) +
+  labs(x = paste0('PCo1 (', 
+                  format(round(D_c_wun.pco[1],2), nsmall = 2),
+                  '%)'),
+       y = paste0('PCo2 (', 
+                  format(round(D_c_wun.pco[2],2), nsmall = 2),
+                  '%)')) +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        panel.background = element_rect(fill = '#FAFAFA'),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+```
+
+*A. digitifera.*
+
+```{r}
+D_p_wun.pco.grd.Adig <- 
+  C_df_wun.pco.Adig |> 
+  ggplot() +
+  geom_hline(yintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_vline(xintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_point(aes(x = V1,
+                 y = V2,
+                 color = Ranking),
+             size = 3,
+             alpha = 0.5) +
+  scale_color_gradientn(colors = c("#B2182B", '#D6AAB0', "gray", '#B2C4D7', "#2166AC")) +
+  labs(x = paste0('PCo1 (', 
+                  format(round(C_c_wun.pco.Adig[1],2), nsmall = 2),
+                  '%)'),
+       y = paste0('PCo2 (', 
+                  format(round(C_c_wun.pco.Adig[2],2), nsmall = 2),
+                  '%)')) +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        panel.background = element_rect(fill = '#FAFAFA'),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+```
+
+*A. millepora.*
+
+```{r}
+D_p_wun.pco.grd.Amil <- 
+  C_df_wun.pco.Amil |> 
+  ggplot() +
+  geom_hline(yintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_vline(xintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_point(aes(x = V1,
+                 y = V2,
+                 color = Ranking),
+             size = 3,
+             alpha = 0.5) +
+  scale_color_gradientn(colors = c("#B2182B", '#D6AAB0', "gray", '#B2C4D7', "#2166AC")) +
+  labs(x = paste0('PCo1 (', 
+                  format(round(C_c_wun.pco.Amil[1],2), nsmall = 2),
+                  '%)'),
+       y = paste0('PCo2 (', 
+                  format(round(C_c_wun.pco.Amil[2],2), nsmall = 2),
+                  '%)')) +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        panel.background = element_rect(fill = '#FAFAFA'),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+```
+
+*A. tenuis.*
+
+```{r}
+D_p_wun.pco.grd.Aten <- 
+  C_df_wun.pco.Aten |> 
+  ggplot() +
+  geom_hline(yintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_vline(xintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_point(aes(x = V1,
+                 y = V2,
+                 color = Ranking),
+             size = 3,
+             alpha = 0.5) +
+  scale_color_gradientn(colors = c("#B2182B", '#D6AAB0', "gray", '#B2C4D7', "#2166AC")) +
+  labs(x = paste0('PCo1 (', 
+                  format(round(C_c_wun.pco.Aten[1],2), nsmall = 2),
+                  '%)'),
+       y = paste0('PCo2 (', 
+                  format(round(C_c_wun.pco.Aten[2],2), nsmall = 2),
+                  '%)')) +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        panel.background = element_rect(fill = '#FAFAFA'),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+```

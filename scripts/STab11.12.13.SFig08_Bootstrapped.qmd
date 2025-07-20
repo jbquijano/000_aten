@@ -1,0 +1,584 @@
+---
+title: "Subsampling"
+format: html
+theme: 
+  light: zephyr
+  dark: cyborg
+toc: true
+page-layout: full
+number-sections: true
+number-depth: 3
+editor: visual
+self-contained: true
+---
+
+# Notes
+
+A naming convention for dataframes was made.
+
+1.  Objects were named with a prefix per section arranged alphabetically.
+2.  A 2nd prefix was added to arrange all the data accordingly:
+    -   Dataframes: .**1**
+    -   Plots: .**2**
+    -   Stats: .**3** (those in dataframe format)
+    -   Others:
+        -   Vectors: .**vec**
+        -   Trees: .**tre**
+        -   Distances: .**dis**
+        -   Functions: .**fun**
+3.  If a dataframe will be used multiple times in case a raw dataframe is needed and an edited one should not supersede the raw one, add a suffix at the end (i.e., **\_1** for first edit, **\_2** for second....).
+4.  Limit 3rd prefix names to three letters and if 2 prefixes are needed, separate with "**.**".
+5.  If an object is just an auxiliary object, put a **Z** prefix.
+
+# Load pkgs
+
+```{r}
+pacman::p_load(tidyverse,           
+               janitor,
+               cowplot,
+               vegan,
+               pairwiseAdonis,
+               ggtext,
+               rstatix)
+```
+
+# Load prior work
+
+```{r}
+load("Subsampling.RData")
+```
+
+# Set colors
+
+```{r}
+Z.vec_col.spc <- 
+  c("A. digitifera"='#221b1b',
+    "A. millepora"="#AA4c0a",
+    "A. tenuis"="#efb83a")
+Z.vec_col.htl <- c("Thermotolerant" = "#B2182B","Intermediate" = "gray","Thermosensitive" = "#2166AC")
+Z.vec_col.prf <- c("#203D3B","#6C9493","#F6E272","#F69312")
+Z.vec_col.dur <- c("#B2182B","#ececec")
+```
+
+# Load dis data
+
+```{r}
+A.1_unifrac <- 
+  read_tsv('../data/Fig02_ITS2Unifrac.dist',
+           col_names = F) |> 
+  select(!2)
+```
+
+Tidy.
+
+```{r}
+A.vec_unifrac.names <- 
+  A.1_unifrac |>
+  pull(1)
+
+A.vec_unifrac.names_1 <- 
+  c('sample_name') |> 
+  append(A.vec_unifrac.names)
+
+# Rename
+A.1_unifrac_1 <- 
+  A.1_unifrac |> 
+  rename_with(~ A.vec_unifrac.names_1, everything())
+```
+
+Remove unwanted IDs.
+
+```{r}
+# List of unwanted ID
+Z.vec_mor.unr <- c("ATEN07","ATEN08","ATEN09","ATEN24","ATEN25")
+
+# Remove
+A.1_unifrac_2 <- 
+  A.1_unifrac_1 |> 
+  filter(!sample_name %in% Z.vec_mor.unr) |> 
+  select(!one_of(Z.vec_mor.unr)) |> 
+  filter(!sample_name %in% Z.vec_mor.unr)
+```
+
+Change to distance.
+
+```{r}
+A.dis_unifrac <- 
+  A.1_unifrac_2 |>
+  column_to_rownames('sample_name') |> 
+  as.dist()
+```
+
+# Load metadata
+
+```{r}
+A.1_mta.htl <- 
+  read_csv('../data/STab11.12.13_MinMaxValues.csv') |> 
+  rename("SampleID" = Colony) |> 
+  mutate(SampleID = case_when(str_detect(SampleID, "D") ~ str_replace(SampleID, "D", "ADIG"),
+                              str_detect(SampleID, "M") ~ str_replace(SampleID, "M", "AMIL"),
+                              str_detect(SampleID, "T") ~ str_replace(SampleID, "T", "ATEN"))) |> 
+  arrange(SampleID)
+```
+
+# PERMANOVA boot
+
+```{r}
+# Set parameters
+set.seed(123)
+Z.n_iter <- 100
+Z.sub_n <- 25
+Z.grp_var <- "Species"
+
+C.fun_run.permanova <- 
+  function(C.dist_mat, C.1_met, Z.sub_n, Z.grp_var, return_rows = FALSE, iter = NA) {
+    
+    # Ensure C.dist_mat is a square matrix (if it's a dist object, convert to matrix)
+    if (inherits(C.dist_mat, "dist")) {
+      C.dist_mat <- as.matrix(C.dist_mat)
+    }
+    
+    # Filter and align metadata with distance matrix
+    C.1_met <- C.1_met %>%
+      filter(SampleID %in% rownames(C.dist_mat)) %>%
+      mutate(SampleID = as.character(SampleID)) %>%
+      arrange(match(SampleID, rownames(C.dist_mat)))
+    
+    # Subsample SampleIDs by group
+    sampled_ids <- C.1_met %>%
+      group_by(across(all_of(Z.grp_var))) %>%
+      slice_sample(n = Z.sub_n) %>%
+      pull(SampleID)
+    
+    if (return_rows) {
+      return(tibble(iteration = iter, SampleID = sampled_ids))
+    }
+    
+    # Subset distance matrix and metadata
+    sub_dist <- as.dist(C.dist_mat[sampled_ids, sampled_ids])
+    meta_sub <- C.1_met %>%
+      filter(SampleID %in% sampled_ids) %>%
+      arrange(match(sampled_ids, SampleID))
+    
+    # Run PERMANOVA
+    perm <- adonis2(sub_dist ~ get(Z.grp_var), data = meta_sub)
+    
+    tibble(
+      iteration = iter,
+      F_value = perm$F[1],
+      p_value = perm$`Pr(>F)`[1],
+      R2 = perm$R2[1]
+    )
+  }
+```
+
+Run.
+
+```{r}
+A.perm_res <- 
+  map_dfr(1:Z.n_iter, ~C.fun_run.permanova.dist(A.dis_unifrac,
+                                                A.1_mta.htl,
+                                                Z.sub_n,
+                                                Z.grp_var,
+                                                return_rows = F,
+                                                iter = .x)) 
+
+# Export test results
+A.perm_res |> 
+  write_csv("../results/Tables/2025/PERMANOVA - Bootstrap sensitivity test.csv")
+
+# Find the representative iteration (closest to median F-value)
+A.vec_median_F <- median(A.perm_res$F_value)
+
+A.vec_rep_iter <- 
+  A.perm_res |> 
+  mutate(F_diff = abs(F_value - A.vec_median_F)) |> 
+  arrange(F_diff) |> 
+  slice(1) |> 
+  pull(iteration)
+
+
+# Re-run the function to get the sampled row IDs for the picked iteration
+A.1_rep_rows <- 
+  C.fun_run.permanova(A.dis_unifrac,
+                      A.1_mta.htl,
+                      Z.sub_n,
+                      Z.grp_var,
+                      return_rows = T,
+                      iter = A.vec_rep_iter)
+```
+
+Extract subsampled data.
+
+```{r}
+# Pull sample ids
+A.vec_rep_rows <- 
+  A.1_rep_rows |> 
+  pull(SampleID)
+
+B.1_unifrac <- 
+  A.1_unifrac_2 |> 
+  filter(sample_name %in% A.vec_rep_rows) |> 
+  arrange(sample_name) |> 
+  pivot_longer(!sample_name) |> 
+  filter(name %in% A.vec_rep_rows) |> 
+  pivot_wider(names_from = name)
+
+B.dis <- 
+  B.1_unifrac |> 
+  column_to_rownames("sample_name") |> 
+  as.dist()
+```
+
+Run PERMANOVA.
+
+```{r}
+B.3_permanova <- 
+  adonis2(B.dis ~ Species,
+          data = arrange((filter(A.1_mta.htl, SampleID %in% A.vec_rep_rows)), SampleID), 
+          permutations = 9999)
+```
+
+Run pairwise PERMANOVA.
+
+```{r}
+# Pairwise PERMANOVA cleaner
+Z_f_pwi.prm.edt <- 
+  function(pmanova_res){
+    a <- 
+      pmanova_res[-1] |> 
+      bind_rows(.id = 'groups') |> 
+      drop_na() %>%
+      .$`Pr(>F)` |> 
+      p.adjust(method = 'BH') 
+    
+    b <- 
+      unique(pmanova_res[-1] |> 
+               bind_rows(.id = 'groups'))$groups |> 
+      unique()
+      
+    d <- 
+       a %>% 
+        data.frame(b,.) |> 
+        rename('groups' = 1,
+               `P-adjusted` = 2) %>% 
+        left_join(pmanova_res[-1] |> 
+                    bind_rows(.id = 'groups'), 
+                  ., 
+                  by = 'groups') |> 
+        mutate(`P-adjusted` = case_when(is.na(`Pr(>F)`) ~ NA,
+                                        .default = `P-adjusted`)) |> 
+        add_column(c('','Residual', 'Total') |> 
+                     c(c('','Residual', 'Total')) |> 
+                     c(c('','Residual', 'Total'))) |> 
+        mutate(groups = case_when(`c(...)` == 'Residual' ~ 'Residual',
+                                  `c(...)` == 'Total' ~ 'Total',
+                                  .default = groups)) |> 
+        select(!last_col()) |> 
+        mutate(groups = str_replace(groups, '_vs_', ' vs. '))
+    
+    return(d)
+
+  }
+
+# Run
+B.3_pairwise.permanova <- 
+    pairwise.adonis2(B.dis ~ Species, 
+                     data = arrange((filter(A.1_mta.htl, SampleID %in% A.vec_rep_rows)), SampleID), 
+                     permutations = 9999)
+
+# Tidy
+B.3_pairwise.permanova_1 <- 
+  B.3_pairwise.permanova |> 
+  Z_f_pwi.prm.edt()
+
+# Save
+B.3_pairwise.permanova_1 |> 
+  write_csv("../Results/Tables/2025/PERMANOVA of subsampled.csv")
+```
+
+# PERMDISP boot
+
+```{r}
+C.fun_run.permdisp <- 
+  function(C.dist_mat, C.1_met, Z.sub_n, Z.grp_var, return_rows = FALSE, iter = NA) {
+    
+    # Ensure distance matrix is square
+    if (inherits(C.dist_mat, "dist")) {
+      C.dist_mat <- as.matrix(C.dist_mat)
+    }
+    
+    # Filter and align metadata
+    C.1_met <- C.1_met %>%
+      filter(SampleID %in% rownames(C.dist_mat)) %>%
+      mutate(SampleID = as.character(SampleID)) %>%
+      arrange(match(SampleID, rownames(C.dist_mat)))
+    
+    # Subsample SampleIDs by group
+    sampled_ids <- C.1_met %>%
+      group_by(across(all_of(Z.grp_var))) %>%
+      slice_sample(n = Z.sub_n) %>%
+      pull(SampleID)
+    
+    if (return_rows) {
+      return(tibble(iteration = iter, SampleID = sampled_ids))
+    }
+    
+    # Subset distance matrix and metadata
+    sub_dist <- as.dist(C.dist_mat[sampled_ids, sampled_ids])
+    meta_sub <- C.1_met %>%
+      filter(SampleID %in% sampled_ids) %>%
+      arrange(match(sampled_ids, SampleID))
+    
+    # Run PERMDISP
+    disp <- betadisper(sub_dist, meta_sub[[Z.grp_var]])
+    perm <- permutest(disp, permutations = 999)
+    
+    tibble(
+      iteration = iter,
+      F_value = perm$tab$F[1],
+      p_value = perm$tab$`Pr(>F)`[1]
+    )
+  }
+```
+
+Run.
+
+```{r}
+set.seed(123)
+Z.n_iter <- 100
+Z.sub_n <- 25
+Z.grp_var <- "Species"
+
+B.perd_res <- 
+  map_dfr(1:Z.n_iter, ~C.fun_run.permdisp(A.dis_unifrac,
+                                          A.1_mta.htl,
+                                          Z.sub_n,
+                                          Z.grp_var,
+                                          return_rows = F,
+                                          iter = .x)) 
+
+# Export test results
+B.perd_res |> 
+  write_csv("../results/Tables/2025/PERMDISP - Bootstrap sensitivity test.csv")
+
+# Find the representative iteration (closest to median F-value)
+B.vec_median_F <- median(B.perd_res$F_value)
+
+B.vec_rep_iter <- 
+  B.perd_res |> 
+  mutate(F_diff = abs(F_value - A.vec_median_F)) |> 
+  arrange(F_diff) |> 
+  slice(1) |> 
+  pull(iteration)
+
+
+# Re-run the function to get the sampled row IDs for the picked iteration
+B.1_rep_rows <- 
+  C.fun_run.permdisp(A.dis_unifrac,
+                     A.1_mta.htl,
+                     Z.sub_n,
+                     Z.grp_var,
+                     return_rows = T,
+                     iter = B.vec_rep_iter)
+```
+
+Extract subsampled data.
+
+```{r}
+# Pull sample ids
+C.vec_rep_rows <- 
+  B.1_rep_rows |> 
+  pull(SampleID)
+
+C.1_unifrac <- 
+  A.1_unifrac_2 |> 
+  filter(sample_name %in% C.vec_rep_rows) |> 
+  arrange(sample_name) |> 
+  pivot_longer(!sample_name) |> 
+  filter(name %in% C.vec_rep_rows) |> 
+  pivot_wider(names_from = name)
+
+C.dis <- 
+  C.1_unifrac |> 
+  column_to_rownames("sample_name") |> 
+  as.dist()
+```
+
+Run PERMDISP.
+
+```{r}
+C.3_permdisp <- 
+  permutest(betadisper(C.dis, 
+                       arrange((filter(A.1_mta.htl, SampleID %in% A.vec_rep_rows)), SampleID) |>
+                         pull(Species)),
+            permutations = 9999)
+  
+  
+  
+C.3_pairwise.permdisp <-
+  permutest(betadisper(C.dis, 
+                       arrange((filter(A.1_mta.htl, SampleID %in% A.vec_rep_rows)), SampleID) |>
+                         pull(Species)), 
+            pairwise = T,
+            permutations = 9999,
+            adjust = 'bh')
+```
+
+Tidy results.
+
+```{r}
+Z_f_pmd.edt <- 
+  function(pmd.per){
+    a <- 
+      pmd.per$tab |> 
+      as.data.frame() |> 
+      select(4,6) |> 
+      drop_na() |> 
+      mutate(Group = 'All') |> 
+      relocate(Group) |>
+      as_tibble()
+   b <- 
+      pmd.per$pairwise$permuted |> 
+      as.data.frame() |> 
+      rename('Q-value' = 1) |> 
+      rownames_to_column('Group') |> 
+      mutate(Group = str_replace(Group, '-', ' - ')) 
+   
+   c <- 
+      pmd.per$statistic |> 
+      as.data.frame() |> 
+      rename('F' = 1) |> 
+      rownames_to_column('Group') |> 
+      filter(Group != 'Overall (F)') |> 
+      mutate(Group = str_replace(Group, '-', ' - '),
+             Group = str_remove(Group, ' \\(t\\)'))
+   
+   d <- 
+      b |> 
+      left_join(c) |> 
+      relocate(Group, `F`)
+
+  e <- 
+      a |> 
+      bind_rows(d) |> 
+      mutate('P-value/Q-value' = if_else(!is.na(`Pr(>F)`), `Pr(>F)`, `Q-value`)) |> 
+      select(1,2,5)
+  
+  return(e)
+  }
+
+# Tidy
+C.3_pairwise.permdisp_1 <- 
+  C.3_pairwise.permdisp |> 
+  Z_f_pmd.edt()
+
+# Save
+C.3_pairwise.permdisp_1 |> 
+  write_csv("../Results/Tables/2025/PERMDISP of subsampled.csv")
+```
+
+# Subsampled PCoA
+
+Get ITS2 profile info.
+
+```{r}
+D.1_its2profile <- 
+  read_tsv('../data/Fig02_ITS2TypeProfiles.txt') |> 
+  row_to_names(6) |> 
+  rename(sample_name = 2,
+         uid = 1) |> 
+  drop_na() |> 
+  filter(!sample_name %in% Z.vec_mor.unr) |> 
+  mutate(Species = case_when(str_detect(sample_name, 'D') ~ 'A. digitifera',
+                             str_detect(sample_name, 'M') ~ 'A. millepora',
+                             .default = 'A. tenuis')) |> 
+  rename(SampleID = 2)
+
+D.1_its2profile_1 <- 
+  D.1_its2profile |> 
+  pivot_longer(!c(1,2,7),
+               names_to = 'ITS2TypeProfile',
+               values_to = 'Counts') |> 
+  mutate(Counts = if_else(Counts > 0, 1, 0)) |> 
+  filter(Counts == 1)
+```
+
+Tidy data.
+
+```{r}
+# Do PcoA
+D.3_pcoa <- 
+  B.dis |>
+  cmdscale(eig = T) |> 
+  pluck('points') |> 
+  as.data.frame() |> 
+  rownames_to_column() |> 
+  rename("SampleID" = 1) |> 
+  left_join(A.1_mta.htl) |> 
+  group_by(Species) |> 
+  # Get centroids
+  mutate(meanX = mean(V1),
+         meanY = mean(V2)) |> 
+  left_join(select(D.1_its2profile_1,2,4))
+
+# Get relative importance
+D.vec_pcoa <- 
+  B.dis |>
+  cmdscale(eig = T) |> 
+  pluck('eig') |> 
+  as.data.frame() |>
+  rename(eig = 1) |>
+  mutate(rel_eig = eig/sum(eig) * 100) |>
+  pull(rel_eig)
+```
+
+Plot.
+
+```{r}
+D.2_pcoa <- 
+  D.3_pcoa |> 
+  ggplot() +
+  geom_hline(yintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_vline(xintercept = 0,
+             color = '#dedede',
+             linewidth = 0.25) +
+  geom_point(aes(x = V1,
+                 y = V2,
+                 color = ITS2TypeProfile,
+                 shape = Species),
+             size = 3,
+             alpha = 0.75) + 
+  labs(x = paste0('PCo1 (', 
+                  format(round(D.vec_pcoa[1],2), nsmall = 2),
+                  '%)'),
+       y = paste0('PCo2 (', 
+                  round(D.vec_pcoa[2],2),
+                  '%)'),
+       color = "ITS2 profile") +
+  scale_color_manual(values = Z.vec_col.prf) +
+  theme_minimal() +
+  theme(panel.grid = element_blank(),
+        axis.line = element_line(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+```
+
+Save.
+
+```{r}
+D.2_pcoa |> 
+  ggsave(filename = "../Results/Figures/2025/PCoA - Subsampled.png", 
+         dpi = 900,
+         width = 5000,
+         height = 3300,
+         units = "px")
+```
+
+# Save work
+
+```{r}
+save.image("Subsampling.RData")
+```

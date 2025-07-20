@@ -1,0 +1,394 @@
+---
+title: "Supplementary figure 3"
+format: html
+theme: 
+  light: zephyr
+  dark: cyborg
+toc: true
+page-layout: full
+number-sections: true
+number-depth: 3
+editor: visual
+self-contained: true
+---
+
+# Supplementary figure 3
+
+This Quarto document contains the data manipulation and plot generation for Supplementary figure 3 of Quijano, et al., 2024.
+
+## Import libraries
+
+```{r}
+pacman::p_load(tidyverse,
+               broom,
+               ggbeeswarm,
+               cowplot,
+               tidytext)
+```
+
+## Import metadata
+
+```{r}
+A_metadata <- 
+  read_csv('../data/Fig01A_metadata.csv')
+```
+
+## Make a colors list
+
+```{r}
+Z_color_htol_int <- c("#B2182B","gray", "#2166AC")
+```
+
+## Import & clean Adig data
+
+Import pre-exposure MIG data.
+
+```{r}
+#| warning: false 
+A_individual_mig_ad_pre_df <- 
+  read_csv('../data/SFig03_AdigMIGPre.csv') |> 
+  mutate(Replicate = rep(c(1,2),
+                         length.out = n()))
+```
+
+Import post-exposure MIG data.
+
+```{r}
+#| warning: false 
+A_individual_mig_ad_post_df <- 
+  read_csv('../data/SFig03_AdigMIGPost.csv') |> 
+  mutate(Replicate = rep(c(1,2),
+                         length.out = n()))
+```
+
+Merge.
+
+```{r}
+A_individual_mig_ad_df <- 
+  A_individual_mig_ad_pre_df |>
+  left_join(A_individual_mig_ad_post_df, 
+            by = c('Colony ID',
+                   'Tank ID',
+                   'Treatment',
+                   'Replicate'),
+            suffix = c(".pre", ".post"))
+```
+
+Compute change.
+
+```{r}
+# Compute
+A_individual_mig_ad_df <- 
+  A_individual_mig_ad_df |> 
+  mutate('% change' = (`Normalized mean gray value.post` - `Normalized mean gray value.pre`)/`Normalized mean gray value.pre` * 100)
+
+# Clean
+A_individual_mig_ad_df <- 
+  A_individual_mig_ad_df |> 
+  filter(Treatment == 'Heat-stressed') |> 
+  select(`Colony ID`, `% change`) |> 
+  mutate(`Colony ID` = str_replace(`Colony ID`, "ADIG", "D")) |> 
+  mutate(Species = 'A. digitifera')
+```
+
+## Import & clean Amil data
+
+Make a function to edit *A. millepora* data.
+
+```{r}
+A_individual_mig_f <- 
+  function(pre_path,
+           post_path,
+           species_id,
+           recode,
+           species){
+    mig_pre_df <- 
+      read_csv(pre_path) |> 
+      mutate(Replicate = rep(c(1,2),
+                             length.out = n()))
+    mig_post_df <- 
+      read_csv(post_path) |> 
+      mutate(Replicate = rep(c(1,2),
+                             length.out = n()))
+    mig_merged <- 
+      mig_pre_df |>
+        left_join(mig_post_df, 
+                  by = c('Colony ID',
+                         'Tank ID',
+                         'Treatment',
+                         'Replicate'),
+                  suffix = c(".pre", ".post"))
+    
+    mig_compute <- 
+      mig_merged |> 
+      mutate('% change' = (`Normalized mean gray value.post` - `Normalized mean gray value.pre`)/`Normalized mean gray value.pre` * 100)|> 
+      filter(Treatment == 'Heat-stressed') |> 
+      select(`Colony ID`, `% change`) |> 
+      left_join(metadata |> rename(`Colony ID` = `Untransformed ID`) |> 
+                  select(2,4), 
+                by = 'Colony ID') |> 
+      relocate(1,3) |> 
+      select(!1) |> 
+      rename('Colony ID' = `Transformed ID2`) |> 
+      mutate(Species = 'A. millepora')
+    return(mig_compute)
+  }
+```
+
+Import and edit.
+
+```{r}
+#| warning: false
+A_individual_mig_am_pre_df <- 
+  read_csv("../data/SFig03_AmilMIGPre.csv") |> 
+  mutate(Replicate = rep(c(1,2),
+                         length.out = n()))
+
+A_individual_mig_am_post_df <- 
+      read_csv("../data/SFig03_AmilMIGPost.csv") |> 
+      mutate(Replicate = rep(c(1,2),
+                             length.out = n()))
+
+A_individual_mig_am_df <- 
+  A_individual_mig_am_pre_df |> 
+  left_join(A_individual_mig_am_post_df, 
+            by = c('Colony ID',
+                   'Tank ID',
+                   'Treatment',
+                   'Replicate'),
+            suffix = c(".pre", ".post"))
+```
+
+Compute change.
+
+```{r}
+# Compute
+A_individual_mig_am_df <- 
+  A_individual_mig_am_df |> 
+  mutate('% change' = (`Normalized mean gray value.post` - `Normalized mean gray value.pre`)/`Normalized mean gray value.pre` * 100)
+
+# Clean
+A_individual_mig_am_df <- 
+  A_individual_mig_am_df |> 
+  filter(Treatment == 'Heat-stressed') |> 
+  left_join(A_metadata |> rename(`Colony ID` = `Untransformed ID`) |> 
+                  select(2,4), 
+                by = 'Colony ID') |> 
+  select(-`Colony ID`) |> 
+  rename('Colony ID' = `Transformed ID2`) |> 
+  relocate(`Colony ID`) |> 
+  select(`Colony ID`, `% change`) |> 
+  mutate(`Colony ID` = str_replace(`Colony ID`, "AMIL", "M")) |> 
+  mutate(Species = 'A. millepora')
+```
+
+## Import & clean Aten data
+
+Make a list of unclassified *A. tenuis* colonies.
+
+```{r}
+Z_aten <- 
+  c("ATEN07","ATEN08","ATEN09","ATEN24","ATEN25")
+```
+
+Import and edit.
+
+```{r}
+#| warning: false
+A_individual_mig_at_pre_df <- 
+  read_csv("../data/SFig03_AtenMIGPre.csv") |> 
+  mutate(Replicate = rep(c(1,2),
+                         length.out = n()))
+
+A_individual_mig_at_post_df <- 
+      read_csv("../data/SFig03_AtenMIGPost.csv") |> 
+      mutate(Replicate = rep(c(1,2),
+                             length.out = n()))
+
+A_individual_mig_at_df <- 
+  A_individual_mig_at_pre_df |> 
+  left_join(A_individual_mig_at_post_df, 
+            by = c('Colony ID',
+                   'Tank ID',
+                   'Treatment',
+                   'Replicate'),
+            suffix = c(".pre", ".post")) |> 
+  filter(!`Colony ID` %in% Z_aten)
+```
+
+Compute change.
+
+```{r}
+# Compute
+A_individual_mig_at_df <- 
+  A_individual_mig_at_df |> 
+  mutate('% change' = (`Normalized mean gray value.post` - `Normalized mean gray value.pre`)/`Normalized mean gray value.pre` * 100)
+
+# Clean
+A_individual_mig_at_df <- 
+  A_individual_mig_at_df |> 
+  filter(Treatment == 'Heat-stressed') |> 
+  select(`Colony ID`, `% change`) |> 
+  mutate(`Colony ID` = str_replace(`Colony ID`, "ATEN", "T")) |> 
+  mutate(Species = 'A. tenuis')
+```
+
+## Merge dataframes & clean
+
+Merge data.
+
+```{r}
+B_individual_mig_all_df <- 
+  bind_rows(A_individual_mig_ad_df,
+            A_individual_mig_am_df,
+            A_individual_mig_at_df)
+```
+
+Make a df that will allow you to reorder and rank colonies based on MIG change averages.
+
+```{r}
+B_individual_mig_all_df1 <- 
+  B_individual_mig_all_df |> 
+  dplyr::group_by(`Colony ID`) |> 
+  drop_na() |> 
+  mutate(Mean = mean(`% change`)) |> 
+  ungroup()
+```
+
+Make a quick clean & ranking.
+
+```{r}
+B_individual_mig_all_df2 <- 
+  B_individual_mig_all_df1 |> 
+  group_by(Species) |> 
+  arrange(Mean, .by_group = TRUE) |> 
+  distinct(`Colony ID`,.keep_all = T) |> 
+  mutate(Ranking  = seq_along(Species)) |>  # Remove unclassified Ts
+  mutate('Heat tolerance' = case_when(Species == 'A. digitifera' & Ranking <= 8 ~ 'High',
+                                      Species == 'A. digitifera' & Ranking >= 33 ~ 'Low',
+                                      Species == 'A. millepora' & Ranking <= 6 ~ 'High',
+                                      Species == 'A. millepora' & Ranking >= 25 ~ 'Low',
+                                      Species == 'A. tenuis' & Ranking <= 5 ~ 'High',
+                                      Species == 'A. tenuis' & Ranking >= 21 ~ 'Low',
+                                      .default = 'Intermediate'))
+```
+
+Export.
+
+```{r}
+#| eval: false
+write_csv(B_individual_mig_all_df2,
+          '../Results/Tables/Supplementary table 04.csv')
+
+write_csv(B_individual_mig_all_df1,
+          '../Results/Tables/Supplementary table 04 - Raw.csv')
+```
+
+## Plot
+
+```{r}
+#| warning: false 
+C_individual_mig_all_p <- 
+  B_individual_mig_all_df1 |> 
+  left_join(B_individual_mig_all_df2 |> ungroup() |> select(1,6),
+            by = 'Colony ID') |> 
+  mutate(`Colony ID` = reorder_within(`Colony ID`, Mean, Species)) |> 
+  ggplot(aes(x = `Colony ID`,
+             y = `% change`,
+             fill = `Heat tolerance`,
+             color = `Heat tolerance`)) + 
+  geom_quasirandom(size = 1,
+                   alpha = 0.25,
+                   method = "pseudorandom",
+                   width = 0.2) +
+  geom_hline(yintercept = 0,
+             linetype = 'dashed',
+             color = 'black',
+             linewidth = 0.25) +
+  stat_summary(fun = 'mean',
+               size = 0.5) +
+  facet_grid(cols = vars(Species),
+             scales = 'free',
+             space = 'free',
+             axes = "all") +
+  scale_fill_manual(values = Z_color_htol_int) +
+  scale_color_manual(values = Z_color_htol_int) +
+  scale_x_reordered() +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        axis.title.x = element_blank(),
+        strip.background = element_blank(),
+        axis.line = element_line(),
+        strip.text = element_text(face = 'italic'),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        legend.background = element_rect(fill = 'transparent'),
+        plot.background = element_rect(fill = 'transparent'))
+```
+
+```{r}
+#| echo: false
+C_individual_mig_all_p
+```
+
+Export.
+
+```{r}
+#| eval: false
+ggsave(plot = C_individual_mig_all_p,
+       filename = '../Results/Figures/Supplementary figure 03 - MIG-based classification.png',
+       dpi = 900,
+       width = 10500, 
+       height = 3000, 
+       units = "px")
+```
+
+## Re-plot
+
+```{r}
+C_individual_mig_all_p <- 
+  B_individual_mig_all_df1 |> 
+  left_join(B_individual_mig_all_df2 |> ungroup() |> select(1,6),
+            by = 'Colony ID') |> 
+  mutate(`Colony ID` = reorder_within(`Colony ID`, Mean, Species)) |> 
+  ggplot(aes(x = `Colony ID`,
+             y = `% change`,
+             fill = `Heat tolerance`,
+             color = `Heat tolerance`)) + 
+  geom_quasirandom(size = 1,
+                   alpha = 0.25,
+                   method = "pseudorandom",
+                   width = 0.2) +
+  geom_hline(yintercept = 0,
+             linetype = 'dashed',
+             color = 'black',
+             linewidth = 0.25) +
+  stat_summary(fun = 'mean',
+               size = 0.5) +
+  facet_grid(cols = vars(Species),
+             scales = 'free',
+             space = 'free',
+             axes = "all") +
+  scale_fill_manual(values = c("black","black","black")) +
+  scale_color_manual(values = c("black","black","black")) +
+  scale_x_reordered() +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        axis.title.x = element_blank(),
+        strip.background = element_blank(),
+        axis.line = element_line(),
+        strip.text = element_text(face = 'italic'),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        legend.background = element_rect(fill = 'transparent'),
+        plot.background = element_rect(fill = 'transparent'))
+```
+
+Export.
+
+```{r}
+ggsave(plot = C_individual_mig_all_p,
+       filename = '../Results/Figures/Supplementary figure 03 - MIG-based classification - 2.png',
+       dpi = 900,
+       width = 10500, 
+       height = 3000, 
+       units = "px")
+```

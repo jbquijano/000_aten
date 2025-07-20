@@ -1,0 +1,1201 @@
+---
+title: "Figure 02"
+format: html
+theme: 
+  light: zephyr
+  dark: cyborg
+toc: true
+page-layout: full
+number-sections: true
+number-depth: 3
+editor: visual
+self-contained: true
+---
+
+# Figure 02 - ITS2 heatmap
+
+This Quarto document contains the data manipulation and plot generation for Supplementary figure 02.
+
+## Notes
+
+A naming convention for dataframes was made.
+
+1.  Dataframes were named with a prefix per section arranged alphabetically.
+2.  A 2nd prefix was added to arrange all the data accordingly:
+    -   Dataframes: df\_
+    -   Vectors: c\_
+    -   Plots: p\_
+    -   Trees: t\_
+    -   Stats: s\_
+    -   Distances: d\_
+3.  If a dataframe will be used multiple times in case a raw dataframe is needed and an edited one should not supersede the raw one, add a suffix at the end (i.e., \_1 for first edit, \_2 for second....).
+4.  Limit object names to three letters and if 2 words are needed, separate with ".".
+5.  If an object is just an auxiliary object, put a Z\_ prefix.
+
+# Import libraries
+
+```{r}
+pacman::p_load(tidyverse,           
+               janitor,
+               cowplot)
+```
+
+# Import metadata
+
+```{r}
+#| warning: false   
+
+A_df_mta.its <-   
+  read_tsv('../data/Fig03_ITS.txt') |> 
+  drop_na()
+
+A_df_mta.prf <- 
+  read_tsv('../data/Fig02_ITS2TypeProfiles.txtt')
+
+A_df_mta.htl <- 
+  read_csv('../data/Fig03_Thermotolerance.csv')
+```
+
+## Clean metadata
+
+Among the Acropora species, only *A. tenuis* showed mortality in the control tanks during exposure. These will not be included in further analyses, cutting the A. tenuis colonies that will be included to 25.
+
+These colonies are: ATEN07, ATEN08, ATEN09, ATEN24, ATEN25.
+
+```{r}
+Z_c_mor.unr <- c("ATEN07","ATEN08","ATEN09","ATEN24","ATEN25")
+```
+
+```{r}
+A_df_mta.its <- 
+  A_df_mta.its |> 
+  filter(!sample_name %in% Z_c_mor.unr) |> 
+  mutate(sample_name = str_replace(sample_name, 'ADIG', 'D'),
+         sample_name = str_replace(sample_name, 'AMIL', 'M'),
+         sample_name = str_replace(sample_name, 'ATEN', 'T')) |> 
+  mutate(Species = case_when(str_detect(sample_name, 'D') ~ 'A. digitifera',
+                             str_detect(sample_name, 'M') ~ 'A. millepora',
+                             .default = 'A. tenuis'))
+
+A_df_mta.prf <- 
+  A_df_mta.prf |> 
+  row_to_names(6) |> 
+  rename(sample_name = 2,
+         uid = 1) |> 
+  drop_na() |> 
+  filter(!sample_name %in% Z_c_mor.unr) |> 
+  mutate(sample_name = str_replace(sample_name, 'ADIG', 'D'),
+         sample_name = str_replace(sample_name, 'AMIL', 'M'),
+         sample_name = str_replace(sample_name, 'ATEN', 'T')) |> 
+  mutate(Species = case_when(str_detect(sample_name, 'D') ~ 'A. digitifera',
+                             str_detect(sample_name, 'M') ~ 'A. millepora',
+                             .default = 'A. tenuis'))
+```
+
+## Make a color scheme
+
+```{r}
+Z_c_col.spc <- c("#294557","#558981","#C6BF88")
+Z_c_col.htl <-
+  c("Thermotolerant"="#B2182B",
+    "Intermediate"="gray",
+    "Thermosensitive"="#2166AC")
+Z_c_col.prf <- c("C3/C3u-C115-C21ab-C3ge" = "#203D3B",
+                 "C3u-C3-C115-C3xt" = "#6C9493",
+                 "C3u-C3xu-C3-C115" = "#F6E272",
+                 "C3u-C3xu-C3-C115-C3xv"="#F69312")
+Z_c_col.dur <- c("#B2182B","#ececec")
+```
+
+## Add info
+
+Add heat tolerance classification info.
+
+```{r}
+A_df_mta.its <- 
+  A_df_mta.its |> 
+  left_join(A_df_mta.htl |> 
+              rename(sample_name = Colony))
+
+A_df_mta.prf <- 
+  A_df_mta.prf |> 
+  left_join(A_df_mta.htl |> 
+              rename(sample_name = Colony))
+```
+
+# EDA
+
+Get total sequence counts.
+
+```{r}
+B_df_its.sum <- 
+  A_df_mta.its |> 
+  select(sample_name,Species,
+         C3u:D17d) |> 
+  pivot_longer(!c(1,2),
+               names_to = 'ITS2Sequence',
+               values_to = 'Count') |> 
+  group_by(ITS2Sequence) |> 
+  summarise(Total = sum(Count)) |> 
+  arrange(desc(Total))
+```
+
+## Top *Cladocopium*
+
+Make a vector of top sequences or DIVs.
+
+```{r}
+B_c_its.Cla.top <- 
+  B_df_its.sum |> 
+  slice(1:7) |> 
+  pull(ITS2Sequence)
+```
+
+Make a grouping where non-top ITS2 sequences will be tagged as "Others" and *Durusdinium* will be excluded.
+
+```{r}
+B_df_its.Cla <- 
+  A_df_mta.its |> 
+  select(!73:79) |> 
+  pivot_longer(40:72,
+               names_to = 'CladoSeqs',
+               values_to = 'Count') |> 
+  mutate(Tag = if_else(CladoSeqs %in% B_c_its.Cla.top,
+                       CladoSeqs,
+                       'Others'))
+```
+
+## *Durusdinium* only
+
+Make a dataframe with *Durusdinium* sequences only.
+
+```{r}
+B_df_its.Dur <- 
+  A_df_mta.its |> 
+  pivot_longer(73:79,
+               names_to = 'DurusSeqs',
+               values_to = 'Count') |> 
+  group_by(sample_name) |> 
+  summarise(Total = sum(Count)) |> 
+  ungroup() |> 
+  mutate(Durusdinium = if_else(Total > 0, 'Yes', 'No'),
+         Species = case_when(str_detect(sample_name, 'D') ~ 'A. digitifera',
+                             str_detect(sample_name, 'M') ~ 'A. millepora',
+                             .default = 'A. tenuis'))
+```
+
+# *A. digitifera*
+
+Make a function that does min-max normalization.
+
+```{r}
+Z_f_min.max <- function(x) {
+    (x - min(x)) / (max(x) - min(x))
+}
+```
+
+## Heatmap
+
+### ITS2 sequence
+
+Extract *A. digitifera* data.
+
+```{r}
+C_df_its.Adig <- 
+  B_df_its.Cla |> 
+  filter(Species == 'A. digitifera') |> 
+  group_by(sample_name,Tag) |> 
+  summarise(Sum = sum(Count)) |> 
+  ungroup() |> 
+  group_by(sample_name) |> 
+  mutate(MinMax = Z_f_min.max(Sum)) |> 
+  ungroup() |> 
+  left_join(A_df_mta.htl |> 
+              rename(sample_name = `Colony ID`)) |> 
+  mutate(Sqrt = sqrt(Sum))
+
+C_df_its.Adig.Dur <- 
+  B_df_its.Dur |> 
+  filter(Species == 'A. digitifera') |> 
+  left_join(A_df_mta.htl |> 
+              rename(sample_name = Colony) |> 
+              select(sample_name, Ranking))
+```
+
+### ITS2 type profile
+
+```{r}
+C_df_prf.Adig <- 
+  A_df_mta.prf |> 
+  filter(Species == 'A. digitifera') |> 
+  pivot_longer(3:6,
+               names_to = 'ITS2TypeProfile',
+               values_to = 'Count') |> 
+  mutate(AbsoluteCount = if_else(Count > 0, 1, 0)) |> 
+  filter(AbsoluteCount == 1)
+```
+
+### Total ITS2 seqs
+
+```{r}
+C_df_its.sum.Adig <- 
+  B_df_its.Cla |> 
+  filter(Species == 'A. digitifera') |> 
+  group_by(Tag) |> 
+  summarise(Sum = sum(Count)) |> 
+  ungroup() |> 
+  mutate(Sum = Sum/100000)
+```
+
+Plot.
+
+```{r}
+C_p_its.Adig <- 
+  C_df_its.Adig |> 
+  left_join(A_df_prf_1 |> 
+              filter(Counts == 1) |> 
+              select(sample_name, ITS2TypeProfile)) |> 
+  ggplot(aes(x  = fct_reorder(sample_name, ITS2TypeProfile),
+             y = fct_relevel(Tag, B_c_its.Cla.top))) +
+  geom_tile(aes(fill = Sqrt),
+            linewidth = 0.1) +
+  scale_y_discrete(expand = c(0,0)) +
+  scale_x_discrete(expand = c(0,0))  +
+  scale_fill_viridis_c(option  = 'mako') +
+  scale_alpha_continuous(c(0,1)) +
+  labs(fill = 'sqrt(count)',
+       x = 'Colony ID',
+       y = "ITS2 sequence") +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        strip.background = element_blank(),
+        axis.line = element_line(),
+        panel.background = element_rect(fill = 'white'),
+        panel.grid.major.y = element_line(colour = 'white'
+                                          ,linewidth = 0.75),
+        panel.grid.minor.y = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        panel.grid.major.x = element_line(colour = 'white',
+                                          linewidth = 0.75),
+        panel.grid.minor.x = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        strip.text = element_text(face = 'italic'),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1,
+                                   face = ifelse(C_df_its.Adig.Dur$Durusdinium == "Yes", 
+                                                 "bold", 
+                                                 "plain")),
+        legend.title.position = "left",
+        legend.title = element_text(hjust = 0.5,
+                                    angle = 90),
+        legend.text = element_text(angle = 90,
+                                   hjust = 0.5))
+
+C_p_prf.Adig <- 
+  C_df_prf.Adig |> 
+  left_join(A_df_prf_1 |> 
+              filter(Counts == 1) |> 
+              select(sample_name, ITS2TypeProfile)) |> 
+  ggplot(aes(x  = fct_reorder(sample_name, ITS2TypeProfile),
+             y = 1)) +
+  geom_bar(aes(fill = ITS2TypeProfile),
+           stat = "identity",
+           width = 1) +
+  scale_y_continuous(expand = c(0,0)) +
+  scale_x_discrete(expand = c(0,0)) +
+  scale_fill_manual(values = Z_c_col.prf) +
+  theme_classic() +
+  theme(axis.line = element_line(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        panel.background = element_rect(fill = 'white'),
+        panel.grid.major.y = element_line(colour = 'white'
+                                          ,linewidth = 0.75),
+        panel.grid.minor.y = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        panel.grid.major.x = element_line(colour = 'white',
+                                          linewidth = 0.75),
+        panel.grid.minor.x = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+
+C_p_tol.Adig <- 
+  C_df_prf.Adig  |> 
+  mutate(`Heat tolerance` = case_when(`Heat tolerance` == "High" ~ "Thermotolerant",
+                                      `Heat tolerance` == "Low" ~ "Thermosensitive",
+                                      .default = `Heat tolerance`)) |> 
+  ggplot(aes(x  = fct_reorder(sample_name, Ranking),
+             y = 1)) +
+  geom_tile(aes(fill = fct_relevel(`Heat tolerance`, c("Thermotolerant", 
+                                                       "Intermediate", 
+                                                       "Thermosensitive")))) +
+  labs(fill = "Group") +
+  scale_fill_manual(values = Z_c_col.htl) +
+  theme_classic() +
+  theme(axis.line = element_line(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        panel.background = element_rect(fill = 'white'),
+        panel.grid.major.y = element_line(colour = 'white'
+                                          ,linewidth = 0.75),
+        panel.grid.minor.y = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        panel.grid.major.x = element_line(colour = 'white',
+                                          linewidth = 0.75),
+        panel.grid.minor.x = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+
+C_p_its.sum.Adig <- 
+  C_df_its.sum.Adig |> 
+  ggplot(aes(x = Sum,
+             y = fct_relevel(Tag, B_c_its.Cla.top |> append('Others')))) +
+  geom_bar(stat = 'identity',
+           fill = '#444444',
+           color = "white",
+           linewidth = 0.1,
+           width = 1) +
+  theme_classic() +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_discrete(expand = c(0,0)) +
+  theme(axis.line = element_line(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title = element_blank())
+```
+
+Export.
+
+```{r}
+ggsave(C_p_its.Adig,
+       filename = '../Results/Figures/Figure 01 - Adig - Heatmap - 2025 - v2.png',
+       dpi = 900,
+       width = 8000, 
+       height = 1750, 
+       units = "px")
+
+ggsave(C_p_prf.Adig,
+       filename = '../Results/Figures/Figure 01A - Adig - ITS2 type profile - 2025.png',
+       dpi = 900,
+       width = 8505, 
+       height = 500, 
+       units = "px")
+
+ggsave(C_p_tol.Adig,
+       filename = '../Results/Figures/Figure 01A - Adig - Heat tolerance.png',
+       dpi = 900,
+       width = 8000, 
+       height = 1750, 
+       units = "px")
+
+ggsave(C_p_its.sum.Adig,
+       filename = '../Results/Figures/Figure 01A - Adig - Total ITS2 seq count.png',
+       dpi = 900,
+       width = 750, 
+       height = 1500, 
+       units = "px")
+```
+
+## T vs S
+
+```{r}
+C_p_its.Adig_1 <- 
+  C_df_its.Adig |> 
+  filter(`Heat tolerance` != "Intermediate") |> 
+  mutate(`Heat tolerance` = if_else(`Heat tolerance` == "Low", "Thermosensitive", "Thermotolerant")) |> 
+  left_join(A_df_prf_1 |> 
+              filter(Counts == 1) |> 
+              select(sample_name, ITS2TypeProfile)) |> 
+  ggplot(aes(x  = fct_reorder(sample_name, Ranking),
+             y = fct_relevel(Tag, B_c_its.Cla.top))) +
+  geom_tile(aes(fill = Sqrt),
+            linewidth = 0.1) +
+  scale_y_discrete(expand = c(0,0)) +
+  scale_x_discrete(expand = c(0,0))  +
+  scale_fill_viridis_c(option  = 'mako') +
+  scale_alpha_continuous(c(0,1)) +
+  labs(fill = 'sqrt(count)',
+       x = 'Colony ID',
+       y = "ITS2 sequence") +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        strip.background = element_blank(),
+        axis.line = element_line(),
+        panel.background = element_rect(fill = 'white'),
+        panel.grid.major.y = element_line(colour = 'white'
+                                          ,linewidth = 0.75),
+        panel.grid.minor.y = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        panel.grid.major.x = element_line(colour = 'white',
+                                          linewidth = 0.75),
+        panel.grid.minor.x = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        strip.text = element_text(face = 'italic'),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1,
+                                   face = ifelse(C_df_its.Adig.Dur$Durusdinium == "Yes", 
+                                                 "bold", 
+                                                 "plain")),
+        legend.title.position = "left",
+        legend.title = element_text(hjust = 0.5,
+                                    angle = 90),
+        legend.text = element_text(angle = 90,
+                                   hjust = 0.5))
+
+C_p_prf.Adig_2 <- 
+  C_df_prf.Adig |> 
+  filter(`Heat tolerance` != "Intermediate") |> 
+  mutate(`Heat tolerance` = if_else(`Heat tolerance` == "Low", "Thermosensitive", "Thermotolerant")) |> 
+  left_join(A_df_prf_1 |> 
+              filter(Counts == 1) |> 
+              select(sample_name, ITS2TypeProfile)) |> 
+  ggplot(aes(x  = fct_reorder(sample_name, Ranking),
+             y = 1)) +
+  geom_bar(aes(fill = ITS2TypeProfile),
+           stat = "identity",
+           width = 1) +
+  scale_y_continuous(expand = c(0,0)) +
+  scale_x_discrete(expand = c(0,0)) +
+  scale_fill_manual(values = Z_c_col.prf) +
+  theme_classic() +
+  theme(axis.line = element_line(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        panel.background = element_rect(fill = 'white'),
+        panel.grid.major.y = element_line(colour = 'white'
+                                          ,linewidth = 0.75),
+        panel.grid.minor.y = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        panel.grid.major.x = element_line(colour = 'white',
+                                          linewidth = 0.75),
+        panel.grid.minor.x = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+
+C_p_tol.Adig_2 <- 
+  C_df_prf.Adig |> 
+  filter(`Heat tolerance` != "Intermediate") |> 
+  mutate(`Heat tolerance` = if_else(`Heat tolerance` == "Low", "Thermosensitive", "Thermotolerant")) |> 
+  left_join(A_df_prf_1 |> 
+              filter(Counts == 1) |> 
+              select(sample_name, ITS2TypeProfile)) |> 
+  ggplot(aes(x  = fct_reorder(sample_name, Ranking),
+             y = 1)) +
+  geom_tile(aes(fill = fct_relevel(`Heat tolerance`, c("Thermotolerant", 
+                                                       "Thermosensitive")))) +
+  labs(fill = "Group") +
+  scale_fill_manual(values = Z_c_col.htl) +
+  theme_classic() +
+  theme(axis.line = element_line(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        panel.background = element_rect(fill = 'white'),
+        panel.grid.major.y = element_line(colour = 'white'
+                                          ,linewidth = 0.75),
+        panel.grid.minor.y = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        panel.grid.major.x = element_line(colour = 'white',
+                                          linewidth = 0.75),
+        panel.grid.minor.x = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+```
+
+Export.
+
+```{r}
+ggsave(C_p_its.Adig_1,
+       filename = '../Results/Figures/Figure 01 - Adig - Heatmap - 2025 - TS - v2.png',
+       dpi = 900,
+       width = 4000, 
+       height = 1750, 
+       units = "px")
+
+ggsave(C_p_prf.Adig_2,
+       filename = '../Results/Figures/Figure 01A - Adig - ITS2 type profile - 2025 - TS.png',
+       dpi = 900,
+       width = 4500, 
+       height = 510, 
+       units = "px")
+
+ggsave(C_p_tol.Adig_2,
+       filename = '../Results/Figures/Figure 01A - Adig - Heat tolerance - TS.png',
+       dpi = 900,
+       width = 4000, 
+       height = 1750, 
+       units = "px")
+```
+
+# *A. millepora*
+
+## Heatmap
+
+### ITS2 sequence
+
+Extract *A. millepora* data.
+
+```{r}
+C_df_its.Amil <- 
+  B_df_its.Cla |> 
+  filter(Species == 'A. millepora') |> 
+  group_by(sample_name,Tag) |> 
+  summarise(Sum = sum(Count)) |> 
+  ungroup() |> 
+  group_by(sample_name) |> 
+  mutate(MinMax = Z_f_min.max(Sum)) |> 
+  ungroup() |> 
+  left_join(A_df_mta.htl |> 
+              rename(sample_name = `Colony ID`)) |> 
+  mutate(Sqrt = sqrt(Sum))
+```
+
+```{r}
+C_df_its.Amil.Dur <- 
+  B_df_its.Dur |> 
+  filter(Species == 'A. millepora') |> 
+  left_join(A_df_mta.htl |> 
+              rename(sample_name = Colony) |> 
+              select(sample_name, Ranking))
+```
+
+### **ITS2 type profile**
+
+```{r}
+C_df_prf.Amil <- 
+  A_df_mta.prf |> 
+  filter(Species == 'A. millepora') |> 
+  pivot_longer(3:6,
+               names_to = 'ITS2TypeProfile',
+               values_to = 'Count') |> 
+  mutate(AbsoluteCount = if_else(Count > 0, 1, 0)) |> 
+  filter(AbsoluteCount == 1)
+```
+
+### **Total ITS2 seqs**
+
+```{r}
+C_df_its.sum.Amil <- 
+  B_df_its.Cla |> 
+  filter(Species == 'A. millepora') |> 
+  group_by(Tag) |> 
+  summarise(Sum = sum(Count)) |> 
+  ungroup() |> 
+  mutate(Sum = Sum/100000)
+```
+
+Plot.
+
+```{r}
+C_p_its.Amil <- 
+  C_df_its.Amil |> 
+  left_join(A_df_prf_1 |> 
+              filter(Counts == 1) |> 
+              select(sample_name, ITS2TypeProfile)) |>
+  ggplot(aes(x  = fct_reorder(sample_name, ITS2TypeProfile),
+             y = fct_relevel(Tag, B_c_its.Cla.top))) +
+  geom_tile(aes(fill = Sqrt)) +
+  scale_y_discrete(expand = c(0,0)) +
+  scale_x_discrete(expand = c(0,0)) +
+  scale_fill_viridis_c(option  = 'mako') +
+  labs(fill = 'sqrt(counts)',
+       x = 'Colony ID',
+       y = "ITS2 sequence") +
+  theme(panel.grid = element_blank(),
+        strip.background = element_blank(),
+        axis.line = element_line(),
+        panel.background = element_rect(fill = 'white'),
+        panel.grid.major.y = element_line(colour = 'white'
+                                          ,linewidth = 0.75),
+        panel.grid.minor.y = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        panel.grid.major.x = element_line(colour = 'white',
+                                          linewidth = 0.75),
+        panel.grid.minor.x = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        strip.text = element_text(face = 'italic'),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1,
+                                   face = ifelse(C_df_its.Amil.Dur$Durusdinium == "Yes", 
+                                                 "bold", 
+                                                 "plain")),
+        legend.title.position = "left",
+        legend.title = element_text(hjust = 0.5,
+                                    angle = 90),
+        legend.text = element_text(angle = 90,
+                                   hjust = 0.5))
+```
+
+```{r}
+C_p_tol.Amil <- 
+  C_df_prf.Amil |> 
+  mutate(`Heat tolerance` = case_when(`Heat tolerance` == "High" ~ "Thermotolerant",
+                                      `Heat tolerance` == "Low" ~ "Thermosensitive",
+                                      .default = `Heat tolerance`)) |> 
+  ggplot(aes(x  = fct_reorder(sample_name, Ranking),
+             y = 1)) +
+  geom_tile(aes(fill = `Heat tolerance`)) +
+  scale_fill_manual(values = Z_c_col.htl) +
+  theme_void()
+
+C_p_prf.Amil <- 
+  C_df_prf.Amil |> 
+  left_join(A_df_prf_1 |> 
+              filter(Counts == 1) |> 
+              select(sample_name, ITS2TypeProfile)) |> 
+  ggplot(aes(x  = fct_reorder(sample_name, ITS2TypeProfile),
+             y = 1)) +
+  geom_bar(aes(fill = ITS2TypeProfile),
+           stat = "identity",
+           width = 1) +
+  scale_y_continuous(expand = c(0,0)) +
+  scale_x_discrete(expand = c(0,0)) +
+  scale_fill_manual(values = Z_c_col.prf) +
+  theme_classic() +
+  theme(axis.line = element_line(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        panel.background = element_rect(fill = 'white'),
+        panel.grid.major.y = element_line(colour = 'white'
+                                          ,linewidth = 0.75),
+        panel.grid.minor.y = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        panel.grid.major.x = element_line(colour = 'white',
+                                          linewidth = 0.75),
+        panel.grid.minor.x = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+
+C_p_its.sum.Amil <- 
+  C_df_its.sum.Amil |> 
+  ggplot(aes(x = Sum,
+             y = fct_relevel(Tag, B_c_its.Cla.top |> append('Others')))) +
+  geom_bar(stat = 'identity',
+           fill = '#444444',
+           color = "white",
+           linewidth = 0.1,
+           width = 1) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_discrete(expand = c(0,0)) +
+  theme_classic() +
+  theme(axis.line = element_line(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title = element_blank())
+```
+
+Export.
+
+```{r}
+ggsave(C_p_its.Amil,
+       filename = '../Results/Figures/Figure 01B - Amil - Heatmap - 2025 - v2.png',
+       dpi = 900,
+       width = 6400, 
+       height = 1750, 
+       units = "px")
+
+ggsave(C_p_tol.Amil,
+       filename = '../Results/Figures/Figure 01B - Amil - Heat tolerance.png',
+       dpi = 900,
+       width = 8000, 
+       height = 1750, 
+       units = "px")
+
+ggsave(C_p_prf.Amil,
+       filename = '../Results/Figures/Figure 01B - Amil - ITS2 type profile - 2025.png',
+       dpi = 900,
+       width = 6905, 
+       height = 500, 
+       units = "px")
+
+ggsave(C_p_its.sum.Amil,
+       filename = '../Results/Figures/Figure 01B - Amil - Total ITS2 seq count.png',
+       dpi = 900,
+       width = 750, 
+       height = 1500, 
+       units = "px")
+```
+
+## T vs S
+
+```{r}
+C_p_its.Amil_1 <- 
+  C_df_its.Amil |> 
+  filter(`Heat tolerance` != "Intermediate") |> 
+  mutate(`Heat tolerance` = if_else(`Heat tolerance` == "Low", "Thermosensitive", "Thermotolerant")) |> 
+  left_join(A_df_prf_1 |> 
+              filter(Counts == 1) |> 
+              select(sample_name, ITS2TypeProfile)) |> 
+  ggplot(aes(x  = fct_reorder(sample_name, Ranking),
+             y = fct_relevel(Tag, B_c_its.Cla.top))) +
+  geom_tile(aes(fill = Sqrt),
+            linewidth = 0.1) +
+  scale_y_discrete(expand = c(0,0)) +
+  scale_x_discrete(expand = c(0,0))  +
+  scale_fill_viridis_c(option  = 'mako') +
+  scale_alpha_continuous(c(0,1)) +
+  labs(fill = 'sqrt(count)',
+       x = 'Colony ID',
+       y = "ITS2 sequence") +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        strip.background = element_blank(),
+        axis.line = element_line(),
+        panel.background = element_rect(fill = 'white'),
+        panel.grid.major.y = element_line(colour = 'white'
+                                          ,linewidth = 0.75),
+        panel.grid.minor.y = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        panel.grid.major.x = element_line(colour = 'white',
+                                          linewidth = 0.75),
+        panel.grid.minor.x = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        strip.text = element_text(face = 'italic'),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1,
+                                   face = ifelse(C_df_its.Adig.Dur$Durusdinium == "Yes", 
+                                                 "bold", 
+                                                 "plain")),
+        legend.title.position = "left",
+        legend.title = element_text(hjust = 0.5,
+                                    angle = 90),
+        legend.text = element_text(angle = 90,
+                                   hjust = 0.5))
+
+C_p_prf.Amil_2 <- 
+  C_df_prf.Amil |> 
+  filter(`Heat tolerance` != "Intermediate") |> 
+  mutate(`Heat tolerance` = if_else(`Heat tolerance` == "Low", "Thermosensitive", "Thermotolerant")) |> 
+  left_join(A_df_prf_1 |> 
+              filter(Counts == 1) |> 
+              select(sample_name, ITS2TypeProfile)) |> 
+  ggplot(aes(x  = fct_reorder(sample_name, Ranking),
+             y = 1)) +
+  geom_bar(aes(fill = ITS2TypeProfile),
+           stat = "identity",
+           width = 1) +
+  scale_y_continuous(expand = c(0,0)) +
+  scale_x_discrete(expand = c(0,0)) +
+  scale_fill_manual(values = Z_c_col.prf) +
+  theme_classic() +
+  theme(axis.line = element_line(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        panel.background = element_rect(fill = 'white'),
+        panel.grid.major.y = element_line(colour = 'white'
+                                          ,linewidth = 0.75),
+        panel.grid.minor.y = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        panel.grid.major.x = element_line(colour = 'white',
+                                          linewidth = 0.75),
+        panel.grid.minor.x = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+
+C_p_tol.Ami_2 <- 
+  C_df_prf.Amil |> 
+  filter(`Heat tolerance` != "Intermediate") |> 
+  mutate(`Heat tolerance` = if_else(`Heat tolerance` == "Low", "Thermosensitive", "Thermotolerant")) |> 
+  left_join(A_df_prf_1 |> 
+              filter(Counts == 1) |> 
+              select(sample_name, ITS2TypeProfile)) |> 
+  ggplot(aes(x  = fct_reorder(sample_name, Ranking),
+             y = 1)) +
+  geom_tile(aes(fill = fct_relevel(`Heat tolerance`, c("Thermotolerant", 
+                                                       "Thermosensitive")))) +
+  labs(fill = "Group") +
+  scale_fill_manual(values = Z_c_col.htl) +
+  theme_classic() +
+  theme(axis.line = element_line(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        panel.background = element_rect(fill = 'white'),
+        panel.grid.major.y = element_line(colour = 'white'
+                                          ,linewidth = 0.75),
+        panel.grid.minor.y = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        panel.grid.major.x = element_line(colour = 'white',
+                                          linewidth = 0.75),
+        panel.grid.minor.x = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+```
+
+Export.
+
+```{r}
+ggsave(C_p_its.Amil_1,
+       filename = '../Results/Figures/Figure 01B - Amil - Heatmap - 2025 - TS - v2.png',
+       dpi = 900,
+       width = 3500, 
+       height = 1750, 
+       units = "px")
+
+ggsave(C_p_prf.Amil_2,
+       filename = '../Results/Figures/Figure 01B - Amil - ITS2 type profile - 2025 - TS.png',
+       dpi = 900,
+       width = 4010, 
+       height = 510, 
+       units = "px")
+
+ggsave(C_p_tol.Ami_2,
+       filename = '../Results/Figures/Figure 01B - Amil - Heat tolerance - TS.png',
+       dpi = 900,
+       width = 3500, 
+       height = 1750, 
+       units = "px")
+```
+
+# *A. tenuis*
+
+## Heatmap
+
+### ITS2 sequence
+
+Extract *A. millepora* data.
+
+```{r}
+C_df_its.Aten <- 
+  B_df_its.Cla |> 
+  filter(Species == 'A. tenuis') |> 
+  group_by(sample_name,Tag) |> 
+  summarise(Sum = sum(Count)) |> 
+  ungroup() |> 
+  group_by(sample_name) |> 
+  mutate(MinMax = Z_f_min.max(Sum)) |> 
+  ungroup() |> 
+  left_join(A_df_mta.htl |> 
+              rename(sample_name = `Colony ID`)) |> 
+  mutate(Sqrt = sqrt(Sum))
+```
+
+```{r}
+C_df_its.Aten.Dur <- 
+  B_df_its.Dur |> 
+  filter(Species == 'A. tenuis') |> 
+  left_join(A_df_mta.htl |> 
+              rename(sample_name = Colony) |> 
+              select(sample_name, Ranking))
+```
+
+### **ITS2 type profile**
+
+```{r}
+C_df_prf.Aten <- 
+  A_df_mta.prf |> 
+  filter(Species == 'A. tenuis') |> 
+  pivot_longer(3:6,
+               names_to = 'ITS2TypeProfile',
+               values_to = 'Count') |> 
+  mutate(AbsoluteCount = if_else(Count > 0, 1, 0)) |> 
+  filter(AbsoluteCount == 1)
+```
+
+### **Total ITS2 seqs**
+
+```{r}
+C_df_its.sum.Aten <- 
+  B_df_its.Cla |> 
+  filter(Species == 'A. tenuis') |> 
+  group_by(Tag) |> 
+  summarise(Sum = sum(Count)) |> 
+  ungroup() |> 
+  mutate(Sum = Sum/100000)
+```
+
+Plot.
+
+```{r}
+C_p_its.Aten <- 
+  C_df_its.Aten |> 
+  left_join(A_df_prf_1 |> 
+              filter(Counts == 1) |> 
+              select(sample_name, ITS2TypeProfile)) |> 
+  ggplot(aes(x  = fct_reorder(sample_name, ITS2TypeProfile),
+             y = fct_relevel(Tag, B_c_its.Cla.top))) +
+  geom_tile(aes(fill = Sqrt)) +
+  scale_y_discrete(expand = c(0,0)) +
+  scale_x_discrete(expand = c(0,0))  +
+  scale_fill_viridis_c(option  = 'mako') +
+  scale_alpha_continuous(c(0,1)) +
+  labs(fill = 'sqrt(count)',
+       x = 'Colony ID',
+       y = "ITS2 sequence") +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        strip.background = element_blank(),
+        axis.line = element_line(),
+        panel.background = element_rect(fill = 'white'),
+        panel.grid.major.y = element_line(colour = 'white'
+                                          ,linewidth = 0.75),
+        panel.grid.minor.y = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        panel.grid.major.x = element_line(colour = 'white',
+                                          linewidth = 0.75),
+        panel.grid.minor.x = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        strip.text = element_text(face = 'italic'),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1,
+                                   face = ifelse(C_df_its.Aten.Dur$Durusdinium == "Yes", 
+                                                 "bold", 
+                                                 "plain")),
+        legend.title.position = "left",
+        legend.title = element_text(hjust = 0.5,
+                                    angle = 90),
+        legend.text = element_text(angle = 90,
+                                   hjust = 0.5))
+```
+
+```{r}
+C_p_tol.Aten <- 
+  C_df_prf.Aten |> 
+  mutate(`Heat tolerance` = case_when(`Heat tolerance` == "High" ~ "Thermotolerant",
+                                      `Heat tolerance` == "Low" ~ "Thermosensitive",
+                                      .default = `Heat tolerance`)) |> 
+  ggplot(aes(x  = fct_reorder(sample_name, Ranking),
+             y = 1)) +
+  geom_tile(aes(fill = `Heat tolerance`)) +
+  scale_fill_manual(values = Z_c_col.htl) +
+  theme_void()
+
+C_p_prf.Aten <- 
+  C_df_prf.Aten |> 
+  left_join(A_df_prf_1 |> 
+              filter(Counts == 1) |> 
+              select(sample_name, ITS2TypeProfile)) |> 
+  ggplot(aes(x  = fct_reorder(sample_name, ITS2TypeProfile),
+             y = 1)) +
+  geom_bar(aes(fill = ITS2TypeProfile),
+           stat = "identity",
+           width = 1) +
+  scale_y_continuous(expand = c(0,0)) +
+  scale_x_discrete(expand = c(0,0)) +
+  scale_fill_manual(values = Z_c_col.prf) +
+  theme_classic() +
+  theme(axis.line = element_line(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        panel.background = element_rect(fill = 'white'),
+        panel.grid.major.y = element_line(colour = 'white'
+                                          ,linewidth = 0.75),
+        panel.grid.minor.y = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        panel.grid.major.x = element_line(colour = 'white',
+                                          linewidth = 0.75),
+        panel.grid.minor.x = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+
+C_p_its.sum.Aten <- 
+  C_df_its.sum.Aten |> 
+  ggplot(aes(x = Sum,
+             y = fct_relevel(Tag, B_c_its.Cla.top |> append('Others')))) +
+  geom_bar(stat = 'identity',
+           fill = '#444444',
+           color = "white",
+           linewidth = 0.1,
+           width = 1) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_discrete(expand = c(0,0)) +
+  theme_classic() +
+  theme(axis.line = element_line(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title = element_blank())
+```
+
+Export.
+
+```{r}
+ggsave(C_p_its.Aten,
+       filename = '../Results/Figures/Figure 01C - Aten - Heatmap - 2025 - v2.png',
+       dpi = 900,
+       width = 5590, 
+       height = 1750, 
+       units = "px")
+
+ggsave(C_p_tol.Aten,
+       filename = '../Results/Figures/Figure 01C - Aten - Heat tolerance.png',
+       dpi = 900,
+       width = 8000, 
+       height = 1750, 
+       units = "px")
+
+ggsave(C_p_prf.Aten,
+       filename = '../Results/Figures/Figure 01C - Aten - ITS2 type profile - 2025.png',
+       dpi = 900,
+       width = 6020, 
+       height = 500, 
+       units = "px")
+
+ggsave(C_p_its.sum.Aten,
+       filename = '../Results/Figures/Figure 01C - Aten - Total ITS2 seq count.png',
+       dpi = 900,
+       width = 750, 
+       height = 1500, 
+       units = "px")
+```
+
+Export for legend.
+
+```{r}
+ggsave(C_p_its.Aten,
+       filename = '../Results/Figures/Figure 01.aux.png',
+       dpi = 900,
+       width = 6000, 
+       height = 3000, 
+       units = "px")
+```
+
+## T vs S
+
+```{r}
+C_p_its.Aten_1 <- 
+  C_df_its.Aten |> 
+  filter(`Heat tolerance` != "Intermediate") |> 
+  mutate(`Heat tolerance` = if_else(`Heat tolerance` == "Low", "Thermosensitive", "Thermotolerant")) |> 
+  left_join(A_df_prf_1 |> 
+              filter(Counts == 1) |> 
+              select(sample_name, ITS2TypeProfile)) |> 
+  ggplot(aes(x  = fct_reorder(sample_name, Ranking),
+             y = fct_relevel(Tag, B_c_its.Cla.top))) +
+  geom_tile(aes(fill = Sqrt),
+            linewidth = 0.1) +
+  scale_y_discrete(expand = c(0,0)) +
+  scale_x_discrete(expand = c(0,0))  +
+  scale_fill_viridis_c(option  = 'mako') +
+  scale_alpha_continuous(c(0,1)) +
+  labs(fill = 'sqrt(count)',
+       x = 'Colony ID',
+       y = "ITS2 sequence") +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        strip.background = element_blank(),
+        axis.line = element_line(),
+        panel.background = element_rect(fill = 'white'),
+        panel.grid.major.y = element_line(colour = 'white'
+                                          ,linewidth = 0.75),
+        panel.grid.minor.y = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        panel.grid.major.x = element_line(colour = 'white',
+                                          linewidth = 0.75),
+        panel.grid.minor.x = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        strip.text = element_text(face = 'italic'),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1,
+                                   face = ifelse(C_df_its.Adig.Dur$Durusdinium == "Yes", 
+                                                 "bold", 
+                                                 "plain")),
+        legend.title.position = "left",
+        legend.title = element_text(hjust = 0.5,
+                                    angle = 90),
+        legend.text = element_text(angle = 90,
+                                   hjust = 0.5))
+
+C_p_prf.Aten_1 <- 
+  C_df_prf.Aten |> 
+  filter(`Heat tolerance` != "Intermediate") |> 
+  mutate(`Heat tolerance` = if_else(`Heat tolerance` == "Low", "Thermosensitive", "Thermotolerant")) |> 
+  left_join(A_df_prf_1 |> 
+              filter(Counts == 1) |> 
+              select(sample_name, ITS2TypeProfile)) |> 
+  ggplot(aes(x  = fct_reorder(sample_name, Ranking),
+             y = 1)) +
+  geom_bar(aes(fill = ITS2TypeProfile),
+           stat = "identity",
+           width = 1) +
+  scale_y_continuous(expand = c(0,0)) +
+  scale_x_discrete(expand = c(0,0)) +
+  scale_fill_manual(values = Z_c_col.prf) +
+  theme_classic() +
+  theme(axis.line = element_line(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        panel.background = element_rect(fill = 'white'),
+        panel.grid.major.y = element_line(colour = 'white'
+                                          ,linewidth = 0.75),
+        panel.grid.minor.y = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        panel.grid.major.x = element_line(colour = 'white',
+                                          linewidth = 0.75),
+        panel.grid.minor.x = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+
+C_p_tol.Aten_1 <- 
+  C_df_prf.Aten |> 
+  filter(`Heat tolerance` != "Intermediate") |> 
+  mutate(`Heat tolerance` = if_else(`Heat tolerance` == "Low", "Thermosensitive", "Thermotolerant")) |> 
+  left_join(A_df_prf_1 |> 
+              filter(Counts == 1) |> 
+              select(sample_name, ITS2TypeProfile)) |> 
+  ggplot(aes(x  = fct_reorder(sample_name, Ranking),
+             y = 1)) +
+  geom_tile(aes(fill = fct_relevel(`Heat tolerance`, c("Thermotolerant", 
+                                                       "Thermosensitive")))) +
+  labs(fill = "Group") +
+  scale_fill_manual(values = Z_c_col.htl) +
+  theme_classic() +
+  theme(axis.line = element_line(),
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        panel.background = element_rect(fill = 'white'),
+        panel.grid.major.y = element_line(colour = 'white'
+                                          ,linewidth = 0.75),
+        panel.grid.minor.y = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        panel.grid.major.x = element_line(colour = 'white',
+                                          linewidth = 0.75),
+        panel.grid.minor.x = element_line(colour = 'white',
+                                          linewidth = 0.25),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+```
+
+Export.
+
+```{r}
+ggsave(C_p_its.Aten_1,
+       filename = '../Results/Figures/Figure 01C - Aten - Heatmap - 2025 - TS - v2.png',
+       dpi = 900,
+       width = 3170, 
+       height = 1750, 
+       units = "px")
+
+ggsave(C_p_prf.Aten_1,
+       filename = '../Results/Figures/Figure 01C - Aten - ITS2 type profile - 2025 - TS.png',
+       dpi = 900,
+       width = 3606, 
+       height = 510, 
+       units = "px")
+
+ggsave(C_p_tol.Aten_1,
+       filename = '../Results/Figures/Figure 01C - Aten - Heat tolerance - TS.png',
+       dpi = 900,
+       width = 3500, 
+       height = 1750, 
+       units = "px")
+```

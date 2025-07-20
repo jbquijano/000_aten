@@ -1,0 +1,170 @@
+---
+title: "Rarefaction"
+format: html
+theme: 
+  light: zephyr
+  dark: cyborg
+toc: true
+page-layout: full
+number-sections: true
+number-depth: 3
+editor: visual
+self-contained: true
+---
+
+# Thermotolerance correlation with Symbiodiniaceae
+
+# Notes
+
+A naming convention for dataframes was made.
+
+1.  Objects were named with a prefix per section arranged alphabetically.
+2.  A 2nd prefix was added to arrange all the data accordingly:
+    -   Dataframes: .**1**
+    -   Plots: .**2**
+    -   Stats: .**3** (those in dataframe format)
+    -   Others:
+        -   Vectors: .**vec**
+        -   Trees: .**tre**
+        -   Distances: .**dis**
+        -   Functions: .**fun**
+3.  If a dataframe will be used multiple times in case a raw dataframe is needed and an edited one should not supersede the raw one, add a suffix at the end (i.e., **\_1** for first edit, **\_2** for second....).
+4.  Limit 3rd prefix names to three letters and if 2 prefixes are needed, separate with "**.**".
+5.  If an object is just an auxiliary object, put a **Z** prefix.
+
+```{r}
+pacman::p_load(tidyverse,           
+               janitor,
+               cowplot,
+               vegan,
+               pairwiseAdonis,
+               ggtext,
+               rstatix,
+               ggbeeswarm,
+               ggtree,
+               ape)
+```
+
+# Load prior work
+
+```{r}
+load("Rarefaction.RData")
+```
+
+# Load metadata
+
+```{r}
+#| warning: false
+
+
+A.1_mta.htl <- 
+  read_csv('../data/STab11.12.13_MinMaxValues.csv') |> 
+  rename("Colony ID" = Colony)
+```
+
+## Make a color scheme
+
+```{r}
+Z.vec_col.spc <- 
+  c("A. digitifera"='#221b1b',
+    "A. millepora"="#AA4c0a",
+    "A. tenuis"="#efb83a")
+Z.vec_col.htl <- c("Thermotolerant" = "#B2182B","Intermediate" = "gray","Thermosensitive" = "#2166AC")
+Z.vec_col.prf <- c("#203D3B","#6C9493","#F6E272","#F69312")
+Z.vec_col.dur <- c("#B2182B","#ececec")
+```
+
+## Clean metadata
+
+Among the Acropora species, only *A. tenuis* showed mortality in the control tanks during exposure. These will not be included in further analyses, cutting the A. tenuis colonies that will be included to 25.
+
+These colonies are: ATEN07, ATEN08, ATEN09, ATEN24, ATEN25.
+
+```{r}
+Z.vec_mor.unr <- c("ATEN07","ATEN08","ATEN09","ATEN24","ATEN25")
+```
+
+# Load Symportal results
+
+## ITS2 seqs
+
+```{r}
+#| warning: false
+A.1_mta.its <-   
+  read_tsv('../data/Fig03_ITS2.txt') |> 
+  drop_na()
+```
+
+# Rarefaction
+
+Convert ITS2 seqs to matrix.
+
+```{r}
+B.1_mta.its <- 
+  A.1_mta.its |> 
+  select(2,40:last_col()) |> 
+  type_convert() |> 
+  column_to_rownames("sample_name")
+
+B.mat_its <- 
+  B.1_mta.its |> 
+  as.matrix()
+```
+
+Tidy.
+
+```{r}
+B.3_rare <- 
+  rarecurve(B.mat_its, step = 100)
+
+B.1_rare <- 
+  B.3_rare |> 
+  map_dfr(bind_rows) |> 
+  bind_cols("Colony ID" = rownames(B.mat_its)) |> 
+  filter(!(`Colony ID`) %in% Z.vec_mor.unr) |> 
+  mutate(`Colony ID` = str_replace(`Colony ID`, 'ADIG', 'D'),
+         `Colony ID` = str_replace(`Colony ID`, 'AMIL', 'M'),
+         `Colony ID` = str_replace(`Colony ID`, 'ATEN', 'T')) |> 
+  pivot_longer(!`Colony ID`) |> 
+  drop_na() |> 
+  mutate(n_seqs = as.numeric((str_replace(name, "N", "")))) |> 
+  select(-name) |> 
+  left_join(select(A.1_mta.htl, 1,2))
+```
+
+Plot.
+
+```{r}
+B.2_rare <- 
+  B.1_rare |> 
+  ggplot(aes(x = n_seqs,
+             y = value,
+             group = `Colony ID`,
+             color = Species)) +
+  geom_line(linewidth = 0.6,
+            alpha = 0.5) +
+  labs(y = "ITS2 richness",
+       x = "Number of sequences") +
+  theme_minimal() +
+  scale_color_manual(values = Z.vec_col.spc) +
+  theme(panel.grid = element_blank(),
+        axis.line = element_line(),
+        axis.ticks = element_line())
+```
+
+Save.
+
+```{r}
+ggsave(B.2_rare,
+       filename = '../Results/Figures/2025/Rarefaction curves.png',
+       dpi = 900,
+       width = 12000, 
+       height = 3000, 
+       units = "px")
+```
+
+# Save work
+
+```{r}
+save.image("Rarefaction.RData")
+```

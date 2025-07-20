@@ -1,0 +1,247 @@
+---
+title: "Supplementary figure 2"
+format: html
+theme: 
+  light: zephyr
+  dark: cyborg
+toc: true
+page-layout: full
+number-sections: true
+number-depth: 3
+editor: visual
+self-contained: true
+---
+
+# Supplementary figure 2
+
+This Quarto document contains the data manipulation and plot generation for Supplementary figure 2 of Quijano, et al., 2024.
+
+## Import libraries
+
+```{r}
+pacman::p_load(tidyverse,
+               broom,
+               ggbeeswarm,
+               survminer,
+               survival,
+               tidytext,
+               cowplot,
+               factoextra)
+```
+
+## Import data
+
+```{r}
+#| warning: false
+
+A_mortality_c <- 
+  list.files(path = '../data/SFig02_Raw/',
+             recursive = F,
+             pattern = 'daily-survival.csv',
+             full.names = T)
+
+A_mortality_df <- 
+  read_csv(A_mortality_c,
+           id = 'file_name') |> 
+  select(!1)
+```
+
+## Clean data
+
+Among the Acropora species, only *A. tenuis* showed mortality in the control tanks during exposure. These will not be included in further analyses, cutting the A. tenuis colonies that will be included to 25.
+
+These colonies are: ATEN07, ATEN08, ATEN09, ATEN24, ATEN25.
+
+```{r}
+A_mortality_unres_c <- c("ATEN07","ATEN08","ATEN09","ATEN24","ATEN25")
+
+A_mortality_df_clean <- 
+  A_mortality_df |> 
+  filter(!Colony %in% A_mortality_unres_c)
+```
+
+Filter data to only include thermally challenged setups. Note that control tanks were only set to check that stress is not confounded by handling stress.
+
+```{r}
+A_mortality_heat_df <- 
+  A_mortality_df_clean |> 
+  filter(Treatment == 'Heat-stressed')
+```
+
+## Set a color palette
+
+```{r}
+color_htol_c <- c("#B2182B", "#2166AC")
+color_htol_int_c <- c("#B2182B","gray", "#2166AC")
+```
+
+## Mortality-based classification
+
+### Clean data
+
+Shape the initially imported data. For this analysis, only the last day per species will be considered to get the proportion of fragment bleached at end of exposure (% survival).
+
+```{r}
+B_individual_mort_df <- 
+  A_mortality_heat_df |> 
+  filter(`Day elapsed` >= 10) |> 
+  filter(!(Species == 'A. digitifera' & `Day elapsed` >= 10 & `Day elapsed` < 13)) |> 
+  mutate('% fragments healthy' = `Healthy fragments`/`N fragment` * 100) |> 
+  group_by(Species) |> 
+  mutate(Colony = case_when(Species == 'A. digitifera' ~ paste0('D', str_sub(Colony,5,6)),
+                            Species =='A. tenuis' ~ paste0('T', str_sub(Colony,5,6)),
+                            Species == 'A. millepora' ~ paste0('M', str_sub(Colony,5,6)),
+                            .default = Colony)) |> 
+  mutate('Proportion of fragments bleached, %' = 100 - `% fragments healthy`)
+```
+
+Rank.
+
+```{r}
+B_individual_mort_rank_df <- 
+  B_individual_mort_df |> 
+  group_by(Species) |> 
+  arrange(`Proportion of fragments bleached, %`, .by_group = TRUE) |> 
+  mutate(Ranking  = seq_along(Species),
+         'Heat tolerance' = ifelse(`Proportion of fragments bleached, %` >= 50, "Low", "High")) 
+```
+
+Export heat tolerance classification data.
+
+```{r}
+B_individual_mort_rank_df |> 
+  write_csv('../Results/Tables/Supplementary table 04 - Mortality-based classification.csv')
+```
+
+Make a function for a customized plot.
+
+```{r}
+B_individual_mort_f <- 
+  function(x){
+    x |> 
+      ggplot(aes(x = reorder(Colony, `Proportion of fragments bleached, %`), 
+                 y = `Proportion of fragments bleached, %`,
+                 fill = `Heat tolerance`)) +
+      geom_bar(stat = 'identity') +
+      facet_grid(cols = vars(Species), 
+                 scales = 'free',
+                 space = 'free',
+                 axes = "all") +
+      scale_fill_manual(values = color_htol_c) +
+      scale_y_continuous(limits = c(0,100), 
+                         expand = expansion(0, 0)) +
+      labs(y = 'Fragment mortality (%)') +
+      theme_classic() +
+      theme(panel.grid = element_blank(),
+            axis.title.x = element_blank(),
+            strip.background = element_blank(),
+            axis.line = element_line(),
+            strip.text = element_text(face = 'italic'),
+            axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  }
+```
+
+### Plot ranking
+
+```{r}
+B_individual_mort_all_p <- 
+  B_individual_mort_rank_df |> 
+  B_individual_mort_f()
+```
+
+### Replot ranking
+
+```{r}
+B_individual_mort_f <- 
+  function(x){
+    x |> 
+      ggplot(aes(x = reorder(Colony, `Proportion of fragments bleached, %`), 
+                 y = `Proportion of fragments bleached, %`,
+                 fill = `Heat tolerance`)) +
+      geom_bar(stat = 'identity') +
+      facet_grid(cols = vars(Species), 
+                 scales = 'free',
+                 space = 'free',
+                 axes = "all") +
+      scale_fill_manual(values = c("black","black")) +
+      scale_y_continuous(limits = c(0,100), 
+                         expand = expansion(0, 0)) +
+      labs(y = 'Fragment mortality (%)') +
+      theme_classic() +
+      theme(panel.grid = element_blank(),
+            axis.title.x = element_blank(),
+            strip.background = element_blank(),
+            axis.line = element_line(),
+            strip.text = element_text(face = 'italic'),
+            axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        legend.background = element_rect(fill = 'transparent'),
+        plot.background = element_rect(fill = 'transparent'))
+  }
+
+B_individual_mort_all_p <- 
+  B_individual_mort_rank_df |> 
+  B_individual_mort_f()
+```
+
+### Plot proportion of H & L
+
+```{r}
+B_individual_classes_p <- 
+  B_individual_mort_rank_df |> 
+  mutate(Count = 1) |> 
+  ggplot(aes(x = Species,
+             y = Count,
+             fill = `Heat tolerance`)) +
+  geom_bar(stat = 'identity') +
+  scale_y_continuous(limits = c(0, 42),
+                     expand = c(0, 0))  +
+  scale_fill_manual(values = color_htol_c) +
+  theme_classic() +
+  theme(panel.grid = element_blank(),
+        axis.title.x = element_blank(),
+        strip.background = element_blank(),
+        axis.line = element_line(),
+        strip.text = element_text(face = 'italic'),
+        axis.text.x = element_text(face = 'italic'),
+        legend.background = element_rect(fill = 'transparent'),
+        plot.background = element_rect(fill = 'transparent'))
+```
+
+### Merge plots
+
+```{r}
+B_individual_merged_p <- 
+  plot_grid(B_individual_mort_all_p +
+              theme(legend.position = 'none'),
+            plot_grid(NULL, B_individual_classes_p, 
+                      NULL, nrow = 1, 
+                      rel_widths = c(0.5, 1, 0.5),
+                      labels = c(NA, 'B', NA),
+                      label_size = 15),
+            labels = c('A', NA),
+            label_size = 15,
+            nrow = 2,
+            rel_heights =  c(1.5,1))
+```
+
+Export plot.
+
+```{r}
+ggsave(B_individual_merged_p,
+       filename = '../Results/Figures/Supplementary figure 02.png',
+       dpi = 900,
+       width = 10000, 
+       height = 4000, 
+       units = "px")
+```
+
+Export replot.
+
+```{r}
+ggsave(B_individual_merged_p,
+       filename = '../Results/Figures/Supplementary figure 02 - 2.png',
+       dpi = 900,
+       width = 10000, 
+       height = 4000, 
+       units = "px")
+```

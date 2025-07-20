@@ -1,0 +1,145 @@
+---
+title: "Supplementary figure 04"
+format: html
+theme: 
+  light: zephyr
+  dark: cyborg
+toc: true
+page-layout: full
+number-sections: true
+number-depth: 3
+editor: visual
+self-contained: true
+---
+
+# Supplementary figure 04
+
+This Quarto document contains the data manipulation and plot generation for Supplementary figure 04 of Quijano, et al., 2024.
+
+## Notes
+
+A naming convention for dataframes was made.
+
+1.  Dataframes were named with a prefix per section arranged alphabetically.
+2.  A 2nd prefix was added to arrange all the data accordingly:
+    -   Dataframes: df\_
+    -   Vectors: c\_
+    -   Plots: p\_
+    -   Trees: t\_
+    -   Stats: s\_
+    -   Distances: d\_
+3.  If a dataframe will be used multiple times in case a raw dataframe is needed and an edited one should not supersede the raw one, add a suffix at the end (i.e., \_1 for first edit, \_2 for second....).
+4.  Limit object names to three letters and if 2 words are needed, separate with ".".
+5.  If an object is just an auxiliary object, put a Z\_ prefix.
+
+# Import libraries
+
+```{r}
+pacman::p_load(tidyverse,
+               janitor,
+               ggtext)
+```
+
+# Import metadata
+
+```{r}
+#| warning: false
+
+
+A_df_mta <- 
+  read_tsv('../data/SFig05_AssemblyStats.txt')
+```
+
+## Clean metadata
+
+Among the Acropora species, only *A. tenuis* showed mortality in the control tanks during exposure. These will not be included in further analyses, cutting the A. tenuis colonies that will be included to 25.
+
+These colonies are: ATEN07, ATEN08, ATEN09, ATEN24, ATEN25.
+
+```{r}
+Z_c_mor.unr <- c("ATEN07","ATEN08","ATEN09","ATEN24","ATEN25")
+```
+
+Remove these colonies.
+
+```{r}
+A_df_mta <- 
+  A_df_mta |> 
+  filter(!sample_name %in% Z_c_mor.unr) |> 
+  drop_na()
+```
+
+# Assembly stats
+
+Get assembly stats.
+
+```{r}
+B_df_stt <- 
+  A_df_mta |> 
+  select(sample_name,
+         raw_contigs:post_med_absolute) |> 
+  mutate(sample_name = str_replace(sample_name, 'ADIG', 'D'),
+         sample_name = str_replace(sample_name, 'AMIL', 'M'),
+         sample_name = str_replace(sample_name, 'ATEN', 'T')) |> 
+  mutate(Species = case_when(str_detect(sample_name, 'D') ~ 'A. digitifera',
+                             str_detect(sample_name, 'M') ~ 'A. millepora',
+                             .default = 'A. tenuis'))
+```
+
+Plot assembly stats.
+
+```{r}
+B_p_stt <- 
+  B_df_stt |> 
+  mutate(Species = if_else(Species == "A. tenuis", 
+                           "<i>A. </i>cf. <i>tenuis</i>", 
+                           paste0("<i>",Species,"</i>"))) |> 
+  ggplot(aes(x = sample_name)) +
+  geom_bar(aes(y = raw_contigs),
+           stat = 'identity',
+           fill = 'gray') +
+  scale_y_continuous(expand = c(0,0),
+                     limits = c(0, 125000)) +
+  ylab('Count') +
+  facet_grid(cols = vars(fct_relevel(Species, c("<i>A. digitifera</i>",
+                                        "<i>A. millepora</i>",
+                                        "<i>A. </i>cf. <i>tenuis</i>"))),
+             scales = 'free',
+             space = 'free') +
+  geom_bar(aes(y = post_med_absolute),
+           stat = 'identity',
+           fill = '#272720') +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        panel.grid = element_blank(),
+        axis.title.x = element_blank(),
+        strip.background = element_blank(),
+        axis.line = element_line(),
+        panel.grid.major.y = element_line(colour = '#dedede',
+                                              linewidth = 0.25),
+        strip.text = element_markdown(),
+        legend.background = element_rect(fill = 'transparent'),
+        plot.background = element_rect(fill = 'transparent'))
+```
+
+Export plot.
+
+```{r}
+ggsave(B_p_stt,
+       filename = '../Results/Figures/Supplementary figure 04.png',
+       dpi = 900,
+       width = 12000, 
+       height = 2500, 
+       units = "px")
+```
+
+Make table stats.
+
+```{r}
+B_df_stt.sum <-
+  B_df_stt |> 
+  summarise(TotalRaw = sum(raw_contigs),
+            TotalPostMed = sum(post_med_absolute),
+            Mean = mean(post_med_absolute),
+            SDev = sd(post_med_absolute))
+```
